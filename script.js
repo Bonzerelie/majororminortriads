@@ -173,86 +173,89 @@
   });
 
   function enableScrollForwardingToParent() {
-    const SCROLL_GAIN = 6.0;
+  const SCROLL_GAIN = 6.0;
 
-    const isVerticallyScrollable = () =>
-      document.documentElement.scrollHeight > window.innerHeight + 2;
+  // Treat the game like a non-scrollable surface.
+  // If you ever add a real scrollable panel inside the iframe, we can refine this.
+  const isVerticallyScrollable = () => false;
 
-    const isInteractiveTarget = (t) =>
-      t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
+  const isInteractiveTarget = (t) =>
+    t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
 
-    let startX = 0;
-    let startY = 0;
-    let lastY = 0;
-    let lockedMode = null;
+  let startX = 0;
+  let startY = 0;
+  let lastY = 0;
+  let lockedMode = null;
 
-    let lastMoveTs = 0;
-    let vScrollTop = 0;
+  let lastMoveTs = 0;
+  let vScrollTop = 0;
 
-    window.addEventListener("touchstart", (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      const t = e.target;
+  window.addEventListener("touchstart", (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.target;
 
-      lockedMode = null;
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      lastY = startY;
+    lockedMode = null;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    lastY = startY;
 
-      lastMoveTs = e.timeStamp || performance.now();
-      vScrollTop = 0;
+    lastMoveTs = e.timeStamp || performance.now();
+    vScrollTop = 0;
 
-      if (isInteractiveTarget(t)) lockedMode = "x";
-    }, { passive: true });
+    if (isInteractiveTarget(t)) lockedMode = "x";
+  }, { passive: true });
 
-    window.addEventListener("touchmove", (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      if (isVerticallyScrollable()) return;
+  window.addEventListener("touchmove", (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    if (isVerticallyScrollable()) return;
 
-      const x = e.touches[0].clientX;
-      const y = e.touches[0].clientY;
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
 
-      const dx = x - startX;
-      const dy = y - startY;
+    const dx = x - startX;
+    const dy = y - startY;
 
-      if (!lockedMode) {
-        if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
-        else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
-        else return;
-      }
-      if (lockedMode !== "y") return;
-
-      const nowTs = e.timeStamp || performance.now();
-      const dt = Math.max(8, nowTs - lastMoveTs);
-      lastMoveTs = nowTs;
-
-      const fingerStep = (y - lastY) * SCROLL_GAIN;
-      lastY = y;
-
-      const scrollTopDelta = -fingerStep;
-      const instV = scrollTopDelta / dt;
-      vScrollTop = vScrollTop * 0.75 + instV * 0.25;
-
-      e.preventDefault();
-      parent.postMessage({ scrollTopDelta }, "*");
-    }, { passive: false });
-
-    function endGesture() {
-      if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
-        const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
-        parent.postMessage({ scrollTopVelocity: capped }, "*");
-      }
-      lockedMode = null;
-      vScrollTop = 0;
+    if (!lockedMode) {
+      if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
+      else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
+      else return;
     }
+    if (lockedMode !== "y") return;
 
-    window.addEventListener("touchend", endGesture, { passive: true });
-    window.addEventListener("touchcancel", endGesture, { passive: true });
+    const nowTs = e.timeStamp || performance.now();
+    const dt = Math.max(8, nowTs - lastMoveTs);
+    lastMoveTs = nowTs;
 
-    window.addEventListener("wheel", (e) => {
-      if (isVerticallyScrollable()) return;
-      parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
-    }, { passive: true });
+    const fingerStep = (y - lastY) * SCROLL_GAIN;
+    lastY = y;
+
+    const scrollTopDelta = -fingerStep;
+    const instV = scrollTopDelta / dt;
+    vScrollTop = vScrollTop * 0.75 + instV * 0.25;
+
+    e.preventDefault();
+    parent.postMessage({ scrollTopDelta }, "*");
+  }, { passive: false });
+
+  function endGesture() {
+    if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
+      const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
+      parent.postMessage({ scrollTopVelocity: capped }, "*");
+    }
+    lockedMode = null;
+    vScrollTop = 0;
   }
+
+  window.addEventListener("touchend", endGesture, { passive: true });
+  window.addEventListener("touchcancel", endGesture, { passive: true });
+
+  // IMPORTANT: not passive + preventDefault, otherwise iframe native scroll competes.
+  window.addEventListener("wheel", (e) => {
+    if (isVerticallyScrollable()) return;
+    e.preventDefault();
+    parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+  }, { passive: false });
+}
   enableScrollForwardingToParent();
 
   // ---------------- audio ----------------
