@@ -1,3 +1,4 @@
+/* /game2style.css */
 :root{
   --page-bg:#ffffff;
   --text:#111;
@@ -402,39 +403,3 @@ button.answerPulseMajor{ animation: majorAnswerPulse 1.1s ease-in-out infinite; 
 /* Answer button fills (separate colors) */
 #minorBtn{ background: var(--minorBtnColor); color:#fff; border-color: rgba(0,0,0,.2); }
 #majorBtn{ background: var(--majorBtnColor); color:#fff; border-color: rgba(0,0,0,.2); }
-
-/* Compare panel (shown only after answering) */
-.comparePanel{
-  width:100%;
-  max-width: 560px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:8px;
-}
-.compareSubtitle{
-  font-size:12px;
-  font-weight:900;
-  opacity:.75;
-  letter-spacing:.2px;
-  text-align:center;
-  margin-top: 2px;
-}
-.compareRow{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  justify-content:center;
-}
-.compareBtn{
-  height:34px;
-  padding:0 12px;
-  border-radius:12px;
-  border:1px solid rgba(0,0,0,.2);
-  background:#fff;
-  cursor:pointer;
-  font-weight:800;
-}
-@media (max-width:420px){
-  .compareBtn{ width: 100%; }
-}
