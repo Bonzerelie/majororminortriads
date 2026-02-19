@@ -14,12 +14,12 @@
 
     de.style.overflow = "hidden";
     de.style.overscrollBehavior = "none";
-    de.style.touchAction = "pan-x";
+    de.style.touchAction = "none";
 
     if (b) {
       b.style.overflow = "hidden";
       b.style.overscrollBehavior = "none";
-      b.style.touchAction = "pan-x";
+      b.style.touchAction = "none";
     }
   }
 
@@ -94,6 +94,8 @@ const AUDIO_DIR = "audio";
   const infoModal = $("infoModal");
   const infoClose = $("infoClose");
   const infoOk = $("infoOk");
+  const PARENT_ORIGIN = "https://www.eartraininglab.com"; // <-- set to your real domain
+
 
   function showInfo() {
     infoModal?.classList.remove("hidden");
@@ -176,7 +178,7 @@ const AUDIO_DIR = "audio";
   const ro = new ResizeObserver(() => {
     const height = measureDocHeightPx();
     if (height && height !== lastHeight) {
-      parent.postMessage({ iframeHeight: height }, "*");
+      parent.postMessage({ iframeHeight: height }, PARENT_ORIGIN);
       lastHeight = height;
     }
   });
@@ -187,7 +189,7 @@ const AUDIO_DIR = "audio";
 function postHeightNow() {
     try {
       const h = measureDocHeightPx();
-      if (h) parent.postMessage({ iframeHeight: h }, "*");
+      if (h) parent.postMessage({ iframeHeight: h }, PARENT_ORIGIN);
     } catch {}
   }
 
@@ -269,24 +271,21 @@ window.addEventListener("load", () => {
     const fingerDy = y - lastY;
     lastY = y;
 
-    const scrollTopDelta = -fingerDy; // finger down => page down
-    if (scrollTopDelta === 0) {
-      e.preventDefault();
-      return;
-    }
+    const scrollTopDelta = -fingerDy;
+if (Math.abs(scrollTopDelta) < 0.25) { e.preventDefault(); return; }
 
     const instV = scrollTopDelta / dt;
     vScrollTop = (vScrollTop * 0.65) + (instV * 0.35);
 
     e.preventDefault();
-    parent.postMessage({ scrollTopDelta }, "*");
+    parent.postMessage({ scrollTopDelta }, PARENT_ORIGIN);
   }, { passive: false });
 
   function endGesture() {
     if (lockedMode === "y" && Math.abs(vScrollTop) > 0.02) {
       // Conservative cap: avoids “rocket fling” on some devices
       const capped = Math.max(-3.5, Math.min(3.5, vScrollTop));
-      parent.postMessage({ scrollTopVelocity: capped }, "*");
+      parent.postMessage({ scrollTopVelocity: capped }, PARENT_ORIGIN);
     }
     lockedMode = null;
     vScrollTop = 0;
@@ -298,7 +297,7 @@ window.addEventListener("load", () => {
   // Mouse/trackpad users: forward wheel 1:1 too
   window.addEventListener("wheel", (e) => {
     if (isVerticallyScrollable()) return;
-    parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+    parent.postMessage({ scrollTopDelta: e.deltaY }, PARENT_ORIGIN);
   }, { passive: true });
 }
   enableScrollForwardingToParent();
