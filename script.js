@@ -1,7 +1,7 @@
-/* /game2script.js
+/* /script.js
    Major Or Minor?! (single triad quality)
    - audio/{stem}{octave}.mp3
-   - Squarespace iframe sizing preserved
+   - Squarespace iframe sizing + scroll forwarding preserved
 */
 (() => {
   "use strict";
@@ -74,8 +74,6 @@
   const infoModal = $("infoModal");
   const infoClose = $("infoClose");
   const infoOk = $("infoOk");
-  const PARENT_ORIGIN = "https://www.eartraininglab.com"; // <-- set to your real domain
-
 
   function showInfo() {
     infoModal?.classList.remove("hidden");
@@ -142,34 +140,24 @@
 
   // ---------------- iframe sizing ----------------
   let lastHeight = 0;
-
-  function measureDocHeightPx() {
-    const de = document.documentElement;
-    const b = document.body;
-    const h = Math.max(
-      de ? de.scrollHeight : 0,
-      b ? b.scrollHeight : 0,
-      de ? Math.ceil(de.getBoundingClientRect().height) : 0,
-      b ? Math.ceil(b.getBoundingClientRect().height) : 0
-    );
-    return Math.max(0, Math.ceil(h));
-  }
-
-  const ro = new ResizeObserver(() => {
-    const height = measureDocHeightPx();
-    if (height && height !== lastHeight) {
-      parent.postMessage({ iframeHeight: height }, PARENT_ORIGIN);
-      lastHeight = height;
+  const ro = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const height = Math.ceil(entry.contentRect.height);
+      if (height !== lastHeight) {
+        parent.postMessage({ iframeHeight: height }, "*");
+        lastHeight = height;
+      }
     }
   });
-
   ro.observe(document.documentElement);
-  if (document.body) ro.observe(document.body);
 
   function postHeightNow() {
     try {
-      const h = measureDocHeightPx();
-      if (h) parent.postMessage({ iframeHeight: h }, PARENT_ORIGIN);
+      const h = Math.max(
+        document.documentElement.scrollHeight,
+        document.body ? document.body.scrollHeight : 0
+      );
+      parent.postMessage({ iframeHeight: h }, "*");
     } catch {}
   }
 
@@ -183,6 +171,89 @@
     setTimeout(postHeightNow, 100);
     setTimeout(postHeightNow, 500);
   });
+
+  function enableScrollForwardingToParent() {
+    const SCROLL_GAIN = 6.0;
+
+    const isVerticallyScrollable = () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2;
+
+    const isInteractiveTarget = (t) =>
+      t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
+
+    let startX = 0;
+    let startY = 0;
+    let lastY = 0;
+    let lockedMode = null;
+
+    let lastMoveTs = 0;
+    let vScrollTop = 0;
+
+    window.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.target;
+
+      lockedMode = null;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lastY = startY;
+
+      lastMoveTs = e.timeStamp || performance.now();
+      vScrollTop = 0;
+
+      if (isInteractiveTarget(t)) lockedMode = "x";
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      if (isVerticallyScrollable()) return;
+
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+
+      const dx = x - startX;
+      const dy = y - startY;
+
+      if (!lockedMode) {
+        if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
+        else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
+        else return;
+      }
+      if (lockedMode !== "y") return;
+
+      const nowTs = e.timeStamp || performance.now();
+      const dt = Math.max(8, nowTs - lastMoveTs);
+      lastMoveTs = nowTs;
+
+      const fingerStep = (y - lastY) * SCROLL_GAIN;
+      lastY = y;
+
+      const scrollTopDelta = -fingerStep;
+      const instV = scrollTopDelta / dt;
+      vScrollTop = vScrollTop * 0.75 + instV * 0.25;
+
+      e.preventDefault();
+      parent.postMessage({ scrollTopDelta }, "*");
+    }, { passive: false });
+
+    function endGesture() {
+      if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
+        const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
+        parent.postMessage({ scrollTopVelocity: capped }, "*");
+      }
+      lockedMode = null;
+      vScrollTop = 0;
+    }
+
+    window.addEventListener("touchend", endGesture, { passive: true });
+    window.addEventListener("touchcancel", endGesture, { passive: true });
+
+    window.addEventListener("wheel", (e) => {
+      if (isVerticallyScrollable()) return;
+      parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+    }, { passive: true });
+  }
+  enableScrollForwardingToParent();
 
   // ---------------- audio ----------------
   let audioCtx = null;
@@ -353,382 +424,721 @@
     for (let i = 0; i < bufs.length; i++) {
       playBufferWindowed(bufs[i], whenSec, playSec, fadeOutSec, perNoteGain);
     }
-
     return true;
   }
 
-  // ---------------- mini chord diagram ----------------
-  const SVG_NS = "http://www.w3.org/2000/svg";
+  // Reference chords (do not alter game state / UI)
+  async function playReferenceChord(quality) {
+    await resumeAudioIfNeeded();
+    const ctx = ensureAudioGraph();
+    if (!ctx) return;
 
-  function el(name, attrs = {}, children = []) {
-    const n = document.createElementNS(SVG_NS, name);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-    for (const ch of children) n.appendChild(ch);
-    return n;
+    stopAllNotes(0.08);
+
+    const root = pitchFromPcOct(0, 4); // C4
+    const third = root + (quality === "major" ? 4 : 3);
+    const fifth = root + 7;
+
+    const whenSec = ctx.currentTime + 0.03;
+    await playChordWindowed([root, third, fifth], whenSec, 2.2, FADE_OUT_SEC);
   }
 
-  function makeMiniDiagram(pitches) {
-    // Simple triad diagram (3 stacked dots + note names)
-    const w = 380;
-    const h = 120;
+  async function playCompareChord(quality) {
+    if (!started || !chord) return;
 
-    const svg = el("svg", { width: w, height: h, viewBox: `0 0 ${w} ${h}` });
+    await resumeAudioIfNeeded();
+    const ctx = ensureAudioGraph();
+    if (!ctx) return;
 
-    const bg = el("rect", { x: 0, y: 0, width: w, height: h, rx: 14, fill: "#fff" });
-    const border = el("rect", { x: 0.5, y: 0.5, width: w - 1, height: h - 1, rx: 14, fill: "none", stroke: "rgba(0,0,0,.15)" });
+    stopAllNotes(0.08);
 
-    const title = el("text", { x: 16, y: 26, "font-size": 14, "font-weight": 900, fill: "#111" });
-    title.textContent = "Chord tones";
+    const root = chord.rootPitch;
+    const third = root + (quality === "major" ? 4 : 3);
+    const fifth = root + 7;
 
-    const pcs = pitches.map(pcFromPitch);
-    const names = pcs.map(noteNameForPc);
-
-    const baseY = 54;
-    const dotX = 22;
-    const textX = 44;
-
-    for (let i = 0; i < names.length; i++) {
-      const y = baseY + (i * 22);
-      const dot = el("circle", { cx: dotX, cy: y - 5, r: 6, fill: "var(--chordTone)", stroke: "rgba(0,0,0,.2)" });
-      const t = el("text", { x: textX, y, "font-size": 14, "font-weight": 900, fill: "#111" });
-      t.textContent = names[i];
-      svg.appendChild(dot);
-      svg.appendChild(t);
-    }
-
-    svg.appendChild(bg);
-    svg.appendChild(border);
-    svg.appendChild(title);
-
-    return svg;
-  }
-
-  function renderMiniDiagram(pitches) {
-    if (!miniMount) return;
-    miniMount.innerHTML = "";
-    miniMount.appendChild(makeMiniDiagram(pitches));
+    const whenSec = ctx.currentTime + 0.03;
+    await playChordWindowed([root, third, fifth], whenSec, 2.6, FADE_OUT_SEC);
   }
 
   // ---------------- game state ----------------
-  let chord = null;          // { rootPitch, quality, pitches[] }
-  let awaitingAnswer = false;
+  const score = { asked: 0, correct: 0, streak: 0, longestStored: 0 };
+
+  let started = false;
   let awaitingNext = false;
+  let canAnswer = false;
 
-  const score = {
-    correct: 0,
-    wrong: 0,
-    streak: 0,
-    bestStreak: 0,
-    total: 0,
-  };
+  let rootMin = 0;
+  let rootMax = 0;
 
-  function setFeedback(html) {
-    feedbackOut.innerHTML = html;
-  }
+  let chord = null; // { quality: 'major'|'minor', rootPitch, pitches:[r, t, f] }
 
-  function updateScoreUI() {
-    scoreOut.textContent =
-      `Correct: ${score.correct}\n` +
-      `Wrong: ${score.wrong}\n` +
-      `Streak: ${score.streak}\n` +
-      `Best: ${score.bestStreak}\n` +
-      `Total: ${score.total}`;
-  }
-
-  function setButtons({ canBegin, canReplay, canAnswer, canNext }) {
-    beginBtn.disabled = !canBegin;
-    replayBtn.disabled = !canReplay;
-    minorBtn.disabled = !canAnswer;
-    majorBtn.disabled = !canAnswer;
-    nextBtn.disabled = !canNext;
-
-    beginBtn.classList.toggle("pulse", canBegin);
-  }
-
-  function setNextStyled(styled) {
-    nextBtn.classList.toggle("nextStyled", styled);
-    nextBtn.classList.toggle("nextPulse", styled);
-  }
-
-  function randomInt(minInclusive, maxInclusive) {
-    const a = Math.ceil(minInclusive);
-    const b = Math.floor(maxInclusive);
+  function randomInt(min, max) {
+    const a = Math.ceil(min);
+    const b = Math.floor(max);
     return Math.floor(Math.random() * (b - a + 1)) + a;
   }
 
-  function pickRandomRootPitch() {
-    const r = RANGES[LOCKED_ROOT_RANGE] || RANGES["hard-3oct"];
-    const startOct = r.startOctave;
-    const octaves = r.octaves;
-
-    const pc = randomInt(0, 11);
-    const oct = randomInt(startOct, startOct + (octaves - 1));
-
-    return pitchFromPcOct(pc, oct);
+  function currentMode() {
+    if (RANGES[LOCKED_ROOT_RANGE]) return RANGES[LOCKED_ROOT_RANGE];
+    const key = noteRangeSel?.value;
+    return (key && RANGES[key]) || RANGES["hard-3oct"];
   }
 
-  function buildTriad(rootPitch, quality) {
-    // Root position triad intervals:
-    // Major: 0, +4, +7
-    // Minor: 0, +3, +7
-    const third = quality === "maj" ? 4 : 3;
-    const fifth = 7;
-    const pitches = [rootPitch, rootPitch + third, rootPitch + fifth];
-    return { rootPitch, quality, pitches };
+  function computeRootBounds() {
+    const m = currentMode();
+    rootMin = pitchFromPcOct(0, m.startOctave);
+    rootMax = pitchFromPcOct(0, m.startOctave + m.octaves);
+
+    // Hard clamp to requested C3..C6 root range
+    const c3 = pitchFromPcOct(0, 3);
+    const f5 = pitchFromPcOct(5, 5);
+    rootMin = Math.max(rootMin, c3);
+    rootMax = Math.min(rootMax, f5);
   }
 
-  function randomChord() {
-    const root = pickRandomRootPitch();
-    const quality = Math.random() < 0.5 ? "maj" : "min";
-    return buildTriad(root, quality);
+  function pickChord() {
+    computeRootBounds();
+
+    const rootPitch = randomInt(rootMin, rootMax);
+    const quality = Math.random() < 0.5 ? "major" : "minor";
+    const third = rootPitch + (quality === "major" ? 4 : 3);
+    const fifth = rootPitch + 7;
+
+    return {
+      quality,
+      rootPitch,
+      pitches: [rootPitch, third, fifth],
+    };
   }
 
-  async function playCurrentChord() {
-    if (!chord) return;
+  function scorePercent() {
+    if (score.asked <= 0) return 0;
+    return Math.round((score.correct / score.asked) * 1000) / 10;
+  }
+
+  function displayLongest() {
+    return Math.max(score.longestStored, score.streak);
+  }
+
+  function renderScore() {
+    const items = [
+      ["Questions asked", score.asked],
+      ["Answers correct", score.correct],
+      ["Correct in a row", score.streak],
+      ["Longest correct streak", displayLongest()],
+      ["Percentage correct", `${scorePercent()}%`],
+    ];
+
+    scoreOut.innerHTML =
+      `<div class="scoreGrid scoreGridVertical">` +
+      items.map(([k, v]) =>
+        `<div class="scoreItem"><span class="scoreK">${k}</span><span class="scoreV">${v}</span></div>`
+      ).join("") +
+      `</div>`;
+  }
+
+  function setFeedback(html) {
+    feedbackOut.innerHTML = html || "";
+  }
+
+  function updateControls() {
+    replayBtn.disabled = !started || !chord;
+
+    const answerDisabled = !started || awaitingNext || !canAnswer || !chord;
+    minorBtn.disabled = answerDisabled;
+    majorBtn.disabled = answerDisabled;
+
+    const answerEnabled = !answerDisabled;
+    minorBtn.classList.toggle("answerPulseMinor", answerEnabled);
+    majorBtn.classList.toggle("answerPulseMajor", answerEnabled);
+
+    nextBtn.disabled = !started || !awaitingNext;
+
+    nextBtn.classList.toggle("nextStyled", started);
+    nextBtn.classList.toggle("nextPulse", started && awaitingNext);
+  }
+
+  function updateBeginButton() {
+    beginBtn.textContent = started ? "Restart Game" : "Begin Game";
+    beginBtn.classList.toggle("pulse", !started);
+  }
+
+  // ---------------- mini keyboard ----------------
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function el(tag, attrs = {}, children = []) {
+    const n = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    for (const c of children) n.appendChild(c);
+    return n;
+  }
+
+  function isBlackPc(pc) {
+    return [1, 3, 6, 8, 10].includes(pc);
+  }
+
+  function whiteIndexInOctave(pc) {
+    const m = { 0:0, 2:1, 4:2, 5:3, 7:4, 9:5, 11:6 };
+    return m[pc] ?? null;
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function computeTwoOctaveWindowForSet(pitches) {
+    const minP = Math.min(...pitches);
+    const maxP = Math.max(...pitches);
+
+    let startC = pitchFromPcOct(0, octFromPitch(minP));
+    let endC = startC + 24;
+
+    if (maxP > endC) {
+      startC += 12;
+      endC = startC + 24;
+    }
+
+    const c3 = pitchFromPcOct(0, 3);
+    const c6 = pitchFromPcOct(0, 6);
+    const hardLo = c3;
+    const hardHi = c6 + 12;
+
+    startC = clamp(startC, hardLo, hardHi);
+    endC = clamp(endC, hardLo, hardHi);
+
+    return { lo: startC, hi: endC };
+  }
+
+  function buildMiniKeyboardChord(pitches, highlightSet) {
+    miniMount.innerHTML = "";
+
+    if (!pitches?.length) {
+      const s = el("svg", { width: 780, height: 128, viewBox: "0 0 780 128", preserveAspectRatio: "xMidYMid meet" });
+      miniMount.appendChild(s);
+      return;
+    }
+
+    const { lo, hi } = computeTwoOctaveWindowForSet(pitches);
+
+    const all = [];
+    for (let p = lo; p <= hi; p++) all.push(p);
+
+    const WHITE_W = 26;
+    const WHITE_H = 92;
+    const BLACK_W = 16;
+    const BLACK_H = 58;
+    const BORDER = 8;
+    const RADIUS = 14;
+
+    const whitePitches = all.filter(p => whiteIndexInOctave(((p % 12) + 12) % 12) != null);
+    if (!whitePitches.length) {
+      const s = el("svg", { width: 780, height: 128, viewBox: "0 0 780 128" });
+      miniMount.appendChild(s);
+      return;
+    }
+
+    const totalWhite = whitePitches.length;
+    const innerW = totalWhite * WHITE_W;
+    const outerW = innerW + BORDER * 2;
+    const outerH = WHITE_H + BORDER * 2;
+
+    const s = el("svg", {
+      width: outerW,
+      height: outerH,
+      viewBox: `0 0 ${outerW} ${outerH}`,
+      preserveAspectRatio: "xMidYMid meet",
+      role: "img",
+      "aria-label": "Chord keyboard diagram (2 octaves)",
+    });
+    s.style.maxWidth = `${outerW}px`;
+
+    const style = el("style");
+    style.textContent = `
+      .frame{ fill:#fff; stroke:#000; stroke-width:${BORDER}; rx:${RADIUS}; ry:${RADIUS}; }
+      .w rect{ fill:#fff; stroke:#222; stroke-width:1; }
+      .b rect{ fill:#111; stroke:#000; stroke-width:1; rx:3; ry:3; }
+      .lbl{ font-family: Arial, Helvetica, sans-serif; font-size:11px; fill: rgba(0,0,0,0.55); font-weight:800; user-select:none; }
+      .tone rect{ fill: var(--chordTone) !important; }
+      .tone .lbl{ fill: rgba(255,255,255,0.95) !important; }
+    `;
+    s.appendChild(style);
+
+    s.appendChild(el("rect", {
+      x: BORDER / 2,
+      y: BORDER / 2,
+      width: outerW - BORDER,
+      height: outerH - BORDER,
+      rx: RADIUS,
+      ry: RADIUS,
+      class: "frame",
+    }));
+
+    const gW = el("g");
+    const gB = el("g");
+    s.appendChild(gW);
+    s.appendChild(gB);
+
+    const startX = BORDER;
+    const startY = BORDER;
+
+    const whiteIndexByPitch = new Map();
+    whitePitches.forEach((p, i) => whiteIndexByPitch.set(p, i));
+
+    const isHighlighted = (p) => highlightSet instanceof Set && highlightSet.has(p);
+
+    for (let i = 0; i < whitePitches.length; i++) {
+      const p = whitePitches[i];
+      const x = startX + i * WHITE_W;
+
+      const pc = ((p % 12) + 12) % 12;
+      const oct = Math.floor(p / 12);
+      const name = PC_NAMES_SHARP[pc] + oct;
+
+      const grp = el("g", { class: "w" });
+      grp.appendChild(el("rect", { x, y: startY, width: WHITE_W, height: WHITE_H }));
+
+      const text = el("text", { x: x + WHITE_W / 2, y: startY + WHITE_H - 12, "text-anchor": "middle", class: "lbl" });
+      text.textContent = (pc === 0) ? name : "";
+      grp.appendChild(text);
+      if (isHighlighted(p)) grp.classList.add("tone");
+
+      gW.appendChild(grp);
+    }
+
+    for (let p = lo; p <= hi; p++) {
+      const pc = ((p % 12) + 12) % 12;
+      if (!isBlackPc(pc)) continue;
+
+      const leftPcByBlack = { 1:0, 3:2, 6:5, 8:7, 10:9 };
+      const leftPc = leftPcByBlack[pc];
+      if (leftPc == null) continue;
+
+      const oct = Math.floor(p / 12);
+      const leftWhitePitch = pitchFromPcOct(leftPc, oct);
+
+      const wi = whiteIndexByPitch.get(leftWhitePitch);
+      if (wi == null) continue;
+
+      const leftX = startX + wi * WHITE_W;
+      const x = leftX + WHITE_W - (BLACK_W / 2);
+
+      const grp = el("g", { class: "b" });
+      grp.appendChild(el("rect", { x, y: startY, width: BLACK_W, height: BLACK_H }));
+      if (isHighlighted(p)) grp.classList.add("tone");
+
+      gB.appendChild(grp);
+    }
+
+    miniMount.appendChild(s);
+  }
+
+  // ---------------- flow ----------------
+  let lastPlayToken = 0;
+
+  async function playCurrentChord({ allowAnswerAfter = true, delaySec = 0 } = {}) {
+    if (!started || !chord) return;
+
+    const token = ++lastPlayToken;
+
+    canAnswer = false;
+    updateControls();
+    stopAllNotes(0.08);
 
     const ctx = ensureAudioGraph();
     if (!ctx) return;
 
-    stopAllNotes(0.04);
+    const safeDelay = Math.max(0, Number.isFinite(delaySec) ? delaySec : 0);
+    const t0 = ctx.currentTime + 0.03 + safeDelay;
 
-    const when = ctx.currentTime + 0.02;
-    await playChordWindowed(chord.pitches, when, CHORD_PLAY_SEC, FADE_OUT_SEC);
+    if (allowAnswerAfter) {
+      window.setTimeout(() => {
+        if (token !== lastPlayToken) return;
+        canAnswer = true;
+        updateControls();
+      }, Math.round(safeDelay * 1000));
+    }
 
-    renderMiniDiagram(chord.pitches);
+    const ok = await playChordWindowed(chord.pitches, t0, CHORD_PLAY_SEC, FADE_OUT_SEC);
+    if (!ok || token !== lastPlayToken) return;
   }
 
-  function showPrompt() {
+  async function startNewRound({ autoplay = true } = {}) {
+    if (!started) return;
+
+    awaitingNext = false;
+    canAnswer = false;
+    updateControls();
+
+    chord = pickChord();
+
+    setCompareVisible(false);
+
+    buildMiniKeyboardChord(null, null);
+    setFeedback("Listen carefully…");
+
+    if (autoplay) {
+      await new Promise(requestAnimationFrame);
+      setFeedback("Decide if the chord is <strong>Major</strong> or <strong>Minor</strong>.");
+      await playCurrentChord({ allowAnswerAfter: true, delaySec: ROUND_START_DELAY_SEC });
+    } else {
+      setFeedback("Press <strong>Replay Chord</strong> to hear it.");
+    }
+  }
+
+  async function replay() {
+    if (!started || !chord) return;
+
+    const lockedForNext = awaitingNext;
+    setFeedback("Replaying…");
+
+    if (!lockedForNext) buildMiniKeyboardChord(null, null);
+    updateControls();
+
+    await playCurrentChord({
+      allowAnswerAfter: !lockedForNext,
+      delaySec: ROUND_START_DELAY_SEC,
+    });
+
+    if (lockedForNext) updateControls();
+  }
+
+  function showPopup(title, message, { showDownload = false } = {}) {
+    if (!streakModal || !modalTitle || !modalBody || !modalDownload || !modalClose) return;
+    modalTitle.textContent = title;
+    modalBody.textContent = message;
+    modalDownload.classList.toggle("hidden", !showDownload);
+    streakModal.classList.remove("hidden");
+    modalClose.focus();
+  }
+
+  function hidePopup() {
+    streakModal?.classList.add("hidden");
+  }
+
+  function considerStreakForLongestOnFail(prevStreak) {
+    if (prevStreak > score.longestStored) {
+      score.longestStored = prevStreak;
+      showPopup(
+        "New Longest Streak!",
+        `New Longest Streak! That's ${prevStreak} correct in a row!`,
+        { showDownload: true }
+      );
+    }
+  }
+
+  function lockAfterAnswer() {
+    canAnswer = false;
+    awaitingNext = true;
+    updateControls();
+  }
+
+  function expectedAnswer() {
+    return chord?.quality || null;
+  }
+
+  function pitchSetForChord(ch) {
+    const s = new Set();
+    if (!ch?.pitches?.length) return s;
+    for (const p of ch.pitches) s.add(p);
+    return s;
+  }
+
+  function answer(choice) {
+    if (!started || !canAnswer || !chord) return;
+
+    score.asked += 1;
+
+    const correct = expectedAnswer();
+    const isCorrect = choice === correct;
+
     const rootName = noteNameForPc(pcFromPitch(chord.rootPitch));
-    setFeedback(`What quality is this triad? (Root: <strong>${rootName}</strong>)`);
-  }
-
-  function revealAnswer(userQuality) {
-    if (!chord) return;
-
-    const isCorrect = userQuality === chord.quality;
-    score.total += 1;
+    const qualityName = chord.quality === "major" ? "Major" : "Minor";
+    const notesLabel = chordNotesLabel(chord.pitches);
 
     if (isCorrect) {
       score.correct += 1;
       score.streak += 1;
-      score.bestStreak = Math.max(score.bestStreak, score.streak);
+      renderScore();
+      setFeedback(
+        `Correct! ✅<br/>` +
+        `Chord: <strong>${rootName} ${qualityName}</strong> — notes ${notesLabel}.`
+      );
     } else {
-      score.wrong += 1;
+      const prev = score.streak;
       score.streak = 0;
+      considerStreakForLongestOnFail(prev);
+      renderScore();
+      setFeedback(
+        `Incorrect ❌ (You chose <strong>${choice}</strong>.)<br/>` +
+        `Chord: <strong>${rootName} ${qualityName}</strong> — notes ${notesLabel} ` +
+        `(Answer: <strong>${correct}</strong>).`
+      );
     }
 
-    updateScoreUI();
-
-    const rootName = noteNameForPc(pcFromPitch(chord.rootPitch));
-    const qualityLabel = chord.quality === "maj" ? "Major" : "Minor";
-    const userLabel = userQuality === "maj" ? "Major" : "Minor";
-
-    const notes = chordNotesLabel(chord.pitches);
-
-    setFeedback(
-      `<div><strong>${isCorrect ? "✅ Correct!" : "❌ Wrong."}</strong></div>` +
-      `<div>Root: <strong>${rootName}</strong></div>` +
-      `<div>Answer: <strong>${qualityLabel}</strong> (you chose ${userLabel})</div>` +
-      `<div>Notes: <strong>${notes}</strong></div>`
-    );
-
-    awaitingAnswer = false;
-    awaitingNext = true;
-
-    setButtons({ canBegin: false, canReplay: true, canAnswer: false, canNext: true });
-    setNextStyled(true);
-
+    buildMiniKeyboardChord(chord.pitches, pitchSetForChord(chord));
+    lockAfterAnswer();
     refreshComparePanel();
   }
 
-  function startRound() {
-    chord = randomChord();
+  async function goNext() {
+    if (!started || !awaitingNext) return;
 
-    awaitingAnswer = false;
-    awaitingNext = false;
-
-    setIntroVisible(false);
-
-    setButtons({ canBegin: false, canReplay: false, canAnswer: false, canNext: false });
-    setNextStyled(false);
-
-    renderMiniDiagram(chord.pitches);
-    setFeedback("Listen…");
-
-    setTimeout(async () => {
-      await playCurrentChord();
-      awaitingAnswer = true;
-
-      showPrompt();
-      setButtons({ canBegin: false, canReplay: true, canAnswer: true, canNext: false });
-
-      // Enable pulse animations on answer buttons
-      minorBtn.classList.add("answerPulseMinor");
-      majorBtn.classList.add("answerPulseMajor");
-    }, Math.max(0, ROUND_START_DELAY_SEC) * 1000);
-  }
-
-  function nextRound() {
-    chord = null;
-    awaitingAnswer = false;
-    awaitingNext = false;
-
-    minorBtn.classList.remove("answerPulseMinor");
-    majorBtn.classList.remove("answerPulseMajor");
-
+    // Hide compare UI immediately on Next (no async lag).
     setCompareVisible(false);
-    setNextStyled(false);
 
-    startRound();
+    setFeedback("");
+    await startNewRound({ autoplay: true });
   }
 
-  function beginGame() {
+  async function beginGame() {
+    await resumeAudioIfNeeded();
+
+    started = true;
+    setIntroVisible(false);
+    updateBeginButton();
+
+    score.asked = 0;
     score.correct = 0;
-    score.wrong = 0;
     score.streak = 0;
-    score.bestStreak = 0;
-    score.total = 0;
+    score.longestStored = 0;
+    renderScore();
 
-    updateScoreUI();
-
-    beginBtn.classList.remove("pulse");
-    startRound();
+    await startNewRound({ autoplay: true });
   }
 
-  // ---------------- compare panel ----------------
-  async function playCompare(quality) {
-    if (!chord) return;
+  function resetToInitialScreen() {
+    stopAllNotes(0.08);
+    hidePopup();
+    hideInfo();
 
-    const compareTriad = buildTriad(chord.rootPitch, quality);
-    const ctx = ensureAudioGraph();
-    if (!ctx) return;
+    started = false;
+    awaitingNext = false;
+    canAnswer = false;
+    chord = null;
 
-    stopAllNotes(0.04);
+    score.asked = 0;
+    score.correct = 0;
+    score.streak = 0;
+    score.longestStored = 0;
 
-    const when = ctx.currentTime + 0.02;
-    await playChordWindowed(compareTriad.pitches, when, CHORD_PLAY_SEC, FADE_OUT_SEC);
-
-    renderMiniDiagram(compareTriad.pitches);
+    renderScore();
+    updateBeginButton();
+    setIntroVisible(true);
+    buildMiniKeyboardChord(null, null);
+    setCompareVisible(false);
+    setFeedback("Press <strong>Begin Game</strong> to start.");
+    updateControls();
   }
 
-  compareMajorBtn?.addEventListener("click", () => playCompare("maj"));
-  compareMinorBtn?.addEventListener("click", () => playCompare("min"));
-
-  // ---------------- streak modal ----------------
-  function showStreakModal() {
-    if (!streakModal || !modalTitle || !modalBody) return;
-
-    modalTitle.textContent = "Nice streak!";
-    modalBody.innerHTML =
-      `<p>Your current streak is <strong>${score.streak}</strong>.</p>` +
-      `<p>Best streak: <strong>${score.bestStreak}</strong>.</p>`;
-
-    streakModal.classList.remove("hidden");
+  function restartGame() {
+    resetToInitialScreen();
   }
 
-  function hideStreakModal() {
-    streakModal?.classList.add("hidden");
-  }
-
-  modalClose?.addEventListener("click", hideStreakModal);
-
-  // Close if user clicks the overlay (outside card)
-  streakModal?.addEventListener("click", (e) => {
-    if (e.target === streakModal) hideStreakModal();
-  });
-
-  // Close on Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !streakModal?.classList.contains("hidden")) hideStreakModal();
-  });
-
-  // ---------------- score card download ----------------
-  function downloadText(filename, text) {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+  // ---------------- downloads ----------------
+  function downloadBlob(blob, filename) {
     const a = document.createElement("a");
+    const url = URL.createObjectURL(blob);
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
   }
 
-  function scoreCardText() {
-    return (
-      "Major Or Minor?!\n" +
-      "================\n\n" +
-      `Correct: ${score.correct}\n` +
-      `Wrong: ${score.wrong}\n` +
-      `Streak: ${score.streak}\n` +
-      `Best streak: ${score.bestStreak}\n` +
-      `Total: ${score.total}\n`
-    );
+  function canvasToPngBlob(canvas) {
+    return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
   }
 
-  function downloadScoreCard() {
-    downloadText("major-or-minor-score.txt", scoreCardText());
+  function drawCardBase(ctx, w, h) {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#fbfbfc";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = "rgba(0,0,0,0.12)";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(8, 8, w - 16, h - 16);
+
+    ctx.fillStyle = "#111";
+    ctx.fillRect(8, 8, w - 16, 74);
   }
 
-  downloadScoreBtn.addEventListener("click", downloadScoreCard);
-  modalDownload?.addEventListener("click", downloadScoreCard);
+  function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = String(text).split(/\s+/);
+    let line = "";
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line, x, y);
+        line = word;
+        y += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    if (line) ctx.fillText(line, x, y);
+  }
 
-  // ---------------- interactions ----------------
-  beginBtn.addEventListener("click", beginGame);
+  function getPlayerName() {
+    const prev = localStorage.getItem("hol_player_name") || "";
+    const name = window.prompt("Enter your name for the score card:", prev) ?? "";
+    const trimmed = String(name).trim();
+    if (trimmed) localStorage.setItem("hol_player_name", trimmed);
+    return trimmed || "Player";
+  }
 
-  replayBtn.addEventListener("click", async () => {
-    await playCurrentChord();
-  });
+  async function downloadScoreCardPng(playerName) {
+    const w = 560;
+    const h = 520;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
 
-  minorBtn.addEventListener("click", () => {
-    if (!awaitingAnswer) return;
-    revealAnswer("min");
-  });
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-  majorBtn.addEventListener("click", () => {
-    if (!awaitingAnswer) return;
-    revealAnswer("maj");
-  });
+    drawCardBase(ctx, w, h);
 
-  minorRefBtn?.addEventListener("click", () => playCompare("min"));
-  majorRefBtn?.addEventListener("click", () => playCompare("maj"));
+    ctx.fillStyle = "#fff";
+    ctx.font = "900 30px Arial";
+    ctx.fillText("Major Or Minor?! — Scorecard", 28, 56);
 
-  nextBtn.addEventListener("click", () => {
-    if (!awaitingNext) return;
-    nextRound();
-  });
+    const bodyX = 28;
+    const bodyY = 130;
 
-  // Keyboard shortcuts:
-  // R = replay, Left = minor, Right = major, Space = next
-  document.addEventListener("keydown", (e) => {
-    if (e.repeat) return;
+    ctx.fillStyle = "#111";
+    ctx.font = "900 22px Arial";
+    ctx.fillText("Summary", bodyX, bodyY);
 
-    const k = e.key;
+    ctx.font = "700 20px Arial";
+    const lines = [
+      `Name: ${playerName}`,
+      `Questions asked: ${score.asked}`,
+      `Answers correct: ${score.correct}`,
+      `Correct in a row: ${score.streak}`,
+      `Longest correct streak: ${displayLongest()}`,
+      `Percentage correct: ${scorePercent()}%`,
+    ];
 
-    if (k === "r" || k === "R") {
-      replayBtn.click();
-      return;
+    let y = bodyY + 44;
+    for (const ln of lines) {
+      ctx.fillText(ln, bodyX, y);
+      y += 34;
     }
 
-    if (k === "ArrowLeft") {
-      minorBtn.click();
-      return;
-    }
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.font = "700 16px Arial";
+    ctx.fillText("Downloaded from www.eartraininglab.com 🎶", bodyX, h - 36);
 
-    if (k === "ArrowRight") {
-      majorBtn.click();
-      return;
-    }
+    const blob = await canvasToPngBlob(canvas);
+    if (blob) downloadBlob(blob, "Major Or Minor Scorecard.png");
+  }
 
-    if (k === " " || k === "Spacebar") {
-      nextBtn.click();
-      return;
-    }
-  });
+  async function downloadRecordPng(streakValue, playerName) {
+    const w = 980;
+    const h = 420;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
 
-  // Initial UI state
-  setButtons({ canBegin: true, canReplay: false, canAnswer: false, canNext: false });
-  setNextStyled(false);
-  updateScoreUI();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    drawCardBase(ctx, w, h);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "900 30px Arial";
+    ctx.fillText("Major Or Minor?! — Record", 28, 56);
+
+    ctx.fillStyle = "#111";
+    ctx.font = "900 28px Arial";
+    ctx.fillText(`${streakValue} correct in a row!`, 28, 142);
+
+    ctx.font = "700 22px Arial";
+    ctx.fillStyle = "#111";
+    const msg = `${playerName} just scored ${streakValue} correct answers in a row on the Major Or Minor?! game 🎉🎶🥳`;
+    drawWrappedText(ctx, msg, 28, 200, w - 56, 34);
+
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.font = "700 16px Arial";
+    ctx.fillText("Downloaded from www.eartraininglab.com 🎶", 28, h - 36);
+
+    const blob = await canvasToPngBlob(canvas);
+    if (blob) downloadBlob(blob, "Major Or Minor Record.png");
+  }
+
+  async function onDownloadScoreCard() {
+    const name = getPlayerName();
+    await downloadScoreCardPng(name);
+  }
+
+  async function onDownloadRecord() {
+    const name = getPlayerName();
+    const v = score.longestStored || displayLongest();
+    await downloadRecordPng(v, name);
+  }
+
+  // ---------------- events ----------------
+  function bind() {
+    beginBtn.addEventListener("click", async () => {
+      if (!started) await beginGame();
+      else restartGame();
+    });
+
+    replayBtn.addEventListener("click", replay);
+
+    minorBtn.addEventListener("click", () => answer("minor"));
+    majorBtn.addEventListener("click", () => answer("major"));
+
+    minorRefBtn?.addEventListener("click", () => playReferenceChord("minor"));
+    majorRefBtn?.addEventListener("click", () => playReferenceChord("major"));
+
+    compareMajorBtn?.addEventListener("click", () => playCompareChord("major"));
+    compareMinorBtn?.addEventListener("click", () => playCompareChord("minor"));
+
+    nextBtn.addEventListener("click", goNext);
+    downloadScoreBtn.addEventListener("click", onDownloadScoreCard);
+
+    modalClose?.addEventListener("click", hidePopup);
+    streakModal?.addEventListener("click", (e) => { if (e.target === streakModal) hidePopup(); });
+    modalDownload?.addEventListener("click", onDownloadRecord);
+
+    noteRangeSel?.addEventListener("change", () => {
+      if (noteRangeSel.disabled) return;
+      computeRootBounds();
+      buildMiniKeyboardChord(null, null);
+      if (started) startNewRound({ autoplay: true });
+    });
+
+    document.addEventListener("keydown", async (e) => {
+      if (!started) return;
+
+      if (e.code === "KeyR") {
+        await replay();
+        return;
+      }
+
+      if (e.code === "KeyM" || e.code === "ArrowLeft") { answer("minor"); return; }
+      if (e.code === "KeyJ" || e.code === "ArrowRight") { answer("major"); return; }
+
+      if (e.code === "Space" || e.code === "Enter") {
+        e.preventDefault();
+        if (awaitingNext) await goNext();
+      }
+    });
+  }
+
+  function init() {
+    bind();
+    computeRootBounds();
+    renderScore();
+    updateBeginButton();
+    setIntroVisible(true);
+    setCompareVisible(false);
+    buildMiniKeyboardChord(null, null);
+    setFeedback("Press <strong>Begin Game</strong> to start.");
+    updateControls();
+  }
+
+  init();
 })();
