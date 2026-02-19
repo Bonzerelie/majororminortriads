@@ -58,6 +58,11 @@
   const feedbackOut = $("feedbackOut");
   const scoreOut = $("scoreOut");
   const miniMount = $("miniMount");
+  const introText = $("introText");
+
+  const comparePanel = $("comparePanel");
+  const compareMajorBtn = $("compareMajorBtn");
+  const compareMinorBtn = $("compareMinorBtn");
 
   const streakModal = $("streakModal");
   const modalTitle = $("modalTitle");
@@ -66,32 +71,31 @@
   const modalDownload = $("modalDownload");
 
   const infoBtn = $("infoBtn");
-const infoModal = $("infoModal");
-const infoClose = $("infoClose");
-const infoOk = $("infoOk");
+  const infoModal = $("infoModal");
+  const infoClose = $("infoClose");
+  const infoOk = $("infoOk");
 
-function showInfo() {
-  infoModal.classList.remove("hidden");
-}
+  function showInfo() {
+    infoModal?.classList.remove("hidden");
+  }
 
-function hideInfo() {
-  infoModal.classList.add("hidden");
-}
+  function hideInfo() {
+    infoModal?.classList.add("hidden");
+  }
 
-infoBtn?.addEventListener("click", showInfo);
-infoClose?.addEventListener("click", hideInfo);
-infoOk?.addEventListener("click", hideInfo);
+  infoBtn?.addEventListener("click", showInfo);
+  infoClose?.addEventListener("click", hideInfo);
+  infoOk?.addEventListener("click", hideInfo);
 
-// Close if user clicks the dark overlay (outside card)
-infoModal?.addEventListener("click", (e) => {
-  if (e.target === infoModal) hideInfo();
-});
+  // Close if user clicks the overlay (outside card)
+  infoModal?.addEventListener("click", (e) => {
+    if (e.target === infoModal) hideInfo();
+  });
 
-// Close on Escape
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !infoModal?.classList.contains("hidden")) hideInfo();
-});
-
+  // Close on Escape
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !infoModal?.classList.contains("hidden")) hideInfo();
+  });
 
   if (
     !beginBtn || !replayBtn || !minorBtn || !majorBtn || !nextBtn ||
@@ -108,6 +112,30 @@ document.addEventListener("keydown", (e) => {
     noteRangeSel.value = LOCKED_ROOT_RANGE;
     noteRangeSel.disabled = true;
     noteRangeSel.parentElement?.classList?.add("hidden");
+  }
+
+  function setIntroVisible(visible) {
+    if (!introText) return;
+    introText.classList.toggle("hidden", !visible);
+  }
+
+  function setCompareVisible(visible, rootName = "X") {
+    if (!comparePanel || !compareMajorBtn || !compareMinorBtn) return;
+
+    const safeRoot = String(rootName || "X");
+    compareMajorBtn.textContent = `Hear ${safeRoot} Major`;
+    compareMinorBtn.textContent = `Hear ${safeRoot} Minor`;
+
+    comparePanel.classList.toggle("hidden", !visible);
+  }
+
+  function refreshComparePanel() {
+    if (!chord || !awaitingNext) {
+      setCompareVisible(false);
+      return;
+    }
+    const rootName = noteNameForPc(pcFromPitch(chord.rootPitch));
+    setCompareVisible(true, rootName);
   }
 
   // ---------------- iframe sizing ----------------
@@ -354,13 +382,6 @@ document.addEventListener("keydown", (e) => {
   function octFromPitch(p) { return Math.floor(p / 12); }
   function getStemForPc(pc) { return PC_TO_STEM[(pc + 12) % 12] || null; }
 
-  function pitchLabel(pitch) {
-    const pc = pcFromPitch(pitch);
-    const oct = octFromPitch(pitch);
-    const isAcc = [1, 3, 6, 8, 10].includes(pc);
-    if (!isAcc) return `${PC_NAMES_SHARP[pc]}${oct}`;
-    return `${PC_NAMES_SHARP[pc]}${oct} / ${PC_NAMES_FLAT[pc]}${oct}`;
-  }
   function noteNameForPc(pc) {
     const p = ((pc % 12) + 12) % 12;
     const isAcc = [1, 3, 6, 8, 10].includes(p);
@@ -374,7 +395,6 @@ document.addEventListener("keydown", (e) => {
     for (const pc of pcs) if (!uniq.includes(pc)) uniq.push(pc);
     return uniq.map(noteNameForPc).join(", ");
   }
-
 
   async function loadPitchBuffer(pitch) {
     const pc = pcFromPitch(pitch);
@@ -407,23 +427,37 @@ document.addEventListener("keydown", (e) => {
     return true;
   }
 
-
   // Reference chords (do not alter game state / UI)
   async function playReferenceChord(quality) {
     await resumeAudioIfNeeded();
     const ctx = ensureAudioGraph();
     if (!ctx) return;
 
-    // Reference button should silence any currently playing audio without affecting game state.
     stopAllNotes(0.08);
 
     const root = pitchFromPcOct(0, 4); // C4
     const third = root + (quality === "major" ? 4 : 3);
     const fifth = root + 7;
 
-    // Schedule immediately; do NOT stop current audio or change answer timing.
     const whenSec = ctx.currentTime + 0.03;
     await playChordWindowed([root, third, fifth], whenSec, 2.2, FADE_OUT_SEC);
+  }
+
+  async function playCompareChord(quality) {
+    if (!started || !chord) return;
+
+    await resumeAudioIfNeeded();
+    const ctx = ensureAudioGraph();
+    if (!ctx) return;
+
+    stopAllNotes(0.08);
+
+    const root = chord.rootPitch;
+    const third = root + (quality === "major" ? 4 : 3);
+    const fifth = root + 7;
+
+    const whenSec = ctx.currentTime + 0.03;
+    await playChordWindowed([root, third, fifth], whenSec, 2.6, FADE_OUT_SEC);
   }
 
   // ---------------- game state ----------------
@@ -450,14 +484,10 @@ document.addEventListener("keydown", (e) => {
     return (key && RANGES[key]) || RANGES["hard-3oct"];
   }
 
-  function modeLabel() {
-    return currentMode().label;
-  }
-
   function computeRootBounds() {
     const m = currentMode();
-    rootMin = pitchFromPcOct(0, m.startOctave);           // C{start}
-    rootMax = pitchFromPcOct(0, m.startOctave + m.octaves); // C{end}
+    rootMin = pitchFromPcOct(0, m.startOctave);
+    rootMax = pitchFromPcOct(0, m.startOctave + m.octaves);
 
     // Hard clamp to requested C3..C6 root range
     const c3 = pitchFromPcOct(0, 3);
@@ -524,7 +554,6 @@ document.addEventListener("keydown", (e) => {
 
     nextBtn.disabled = !started || !awaitingNext;
 
-    // Next button styling/pulse when it's actionable
     nextBtn.classList.toggle("nextStyled", started);
     nextBtn.classList.toggle("nextPulse", started && awaitingNext);
   }
@@ -534,7 +563,7 @@ document.addEventListener("keydown", (e) => {
     beginBtn.classList.toggle("pulse", !started);
   }
 
-  // ---------------- mini keyboard (renders into #miniMount inside Feedback card) ----------------
+  // ---------------- mini keyboard ----------------
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   function el(tag, attrs = {}, children = []) {
@@ -572,7 +601,7 @@ document.addEventListener("keydown", (e) => {
     const c3 = pitchFromPcOct(0, 3);
     const c6 = pitchFromPcOct(0, 6);
     const hardLo = c3;
-    const hardHi = c6 + 12; // allow chord tones above C6 root range
+    const hardHi = c6 + 12;
 
     startC = clamp(startC, hardLo, hardHi);
     endC = clamp(endC, hardLo, hardHi);
@@ -601,7 +630,7 @@ document.addEventListener("keydown", (e) => {
     const BORDER = 8;
     const RADIUS = 14;
 
-    const whitePitches = all.filter(p => whiteIndexInOctave(pcFromPitch(p)) != null);
+    const whitePitches = all.filter(p => whiteIndexInOctave(((p % 12) + 12) % 12) != null);
     if (!whitePitches.length) {
       const s = el("svg", { width: 780, height: 128, viewBox: "0 0 780 128" });
       miniMount.appendChild(s);
@@ -629,7 +658,6 @@ document.addEventListener("keydown", (e) => {
       .w rect{ fill:#fff; stroke:#222; stroke-width:1; }
       .b rect{ fill:#111; stroke:#000; stroke-width:1; rx:3; ry:3; }
       .lbl{ font-family: Arial, Helvetica, sans-serif; font-size:11px; fill: rgba(0,0,0,0.55); font-weight:800; user-select:none; }
-
       .tone rect{ fill: var(--chordTone) !important; }
       .tone .lbl{ fill: rgba(255,255,255,0.95) !important; }
     `;
@@ -662,8 +690,8 @@ document.addEventListener("keydown", (e) => {
       const p = whitePitches[i];
       const x = startX + i * WHITE_W;
 
-      const pc = pcFromPitch(p);
-      const oct = octFromPitch(p);
+      const pc = ((p % 12) + 12) % 12;
+      const oct = Math.floor(p / 12);
       const name = PC_NAMES_SHARP[pc] + oct;
 
       const grp = el("g", { class: "w" });
@@ -678,14 +706,14 @@ document.addEventListener("keydown", (e) => {
     }
 
     for (let p = lo; p <= hi; p++) {
-      const pc = pcFromPitch(p);
+      const pc = ((p % 12) + 12) % 12;
       if (!isBlackPc(pc)) continue;
 
       const leftPcByBlack = { 1:0, 3:2, 6:5, 8:7, 10:9 };
       const leftPc = leftPcByBlack[pc];
       if (leftPc == null) continue;
 
-      const oct = octFromPitch(p);
+      const oct = Math.floor(p / 12);
       const leftWhitePitch = pitchFromPcOct(leftPc, oct);
 
       const wi = whiteIndexByPitch.get(leftWhitePitch);
@@ -712,7 +740,6 @@ document.addEventListener("keydown", (e) => {
 
     const token = ++lastPlayToken;
 
-    // Prevent answers during teardown; enable at actual playback start.
     canAnswer = false;
     updateControls();
     stopAllNotes(0.08);
@@ -744,6 +771,8 @@ document.addEventListener("keydown", (e) => {
 
     chord = pickChord();
 
+    setCompareVisible(false);
+
     buildMiniKeyboardChord(null, null);
     setFeedback("Listen carefully…");
 
@@ -758,10 +787,19 @@ document.addEventListener("keydown", (e) => {
 
   async function replay() {
     if (!started || !chord) return;
+
+    const lockedForNext = awaitingNext;
     setFeedback("Replaying…");
-    buildMiniKeyboardChord(null, null);
-    awaitingNext = false;
-    await playCurrentChord({ allowAnswerAfter: true, delaySec: ROUND_START_DELAY_SEC });
+
+    if (!lockedForNext) buildMiniKeyboardChord(null, null);
+    updateControls();
+
+    await playCurrentChord({
+      allowAnswerAfter: !lockedForNext,
+      delaySec: ROUND_START_DELAY_SEC,
+    });
+
+    if (lockedForNext) updateControls();
   }
 
   function showPopup(title, message, { showDownload = false } = {}) {
@@ -839,10 +877,15 @@ document.addEventListener("keydown", (e) => {
 
     buildMiniKeyboardChord(chord.pitches, pitchSetForChord(chord));
     lockAfterAnswer();
+    refreshComparePanel();
   }
 
   async function goNext() {
     if (!started || !awaitingNext) return;
+
+    // Hide compare UI immediately on Next (no async lag).
+    setCompareVisible(false);
+
     setFeedback("");
     await startNewRound({ autoplay: true });
   }
@@ -851,6 +894,7 @@ document.addEventListener("keydown", (e) => {
     await resumeAudioIfNeeded();
 
     started = true;
+    setIntroVisible(false);
     updateBeginButton();
 
     score.asked = 0;
@@ -862,23 +906,32 @@ document.addEventListener("keydown", (e) => {
     await startNewRound({ autoplay: true });
   }
 
-  function restartGame() {
+  function resetToInitialScreen() {
     stopAllNotes(0.08);
+    hidePopup();
+    hideInfo();
+
+    started = false;
+    awaitingNext = false;
+    canAnswer = false;
+    chord = null;
 
     score.asked = 0;
     score.correct = 0;
     score.streak = 0;
     score.longestStored = 0;
+
     renderScore();
-
-    awaitingNext = false;
-    canAnswer = false;
-    chord = null;
-
+    updateBeginButton();
+    setIntroVisible(true);
     buildMiniKeyboardChord(null, null);
-    setFeedback("Restarted. Press <strong>Replay Chord</strong> or <strong>Begin Game</strong> to play.");
+    setCompareVisible(false);
+    setFeedback("Press <strong>Begin Game</strong> to start.");
+    updateControls();
+  }
 
-    startNewRound({ autoplay: true });
+  function restartGame() {
+    resetToInitialScreen();
   }
 
   // ---------------- downloads ----------------
@@ -960,7 +1013,6 @@ document.addEventListener("keydown", (e) => {
     ctx.font = "700 20px Arial";
     const lines = [
       `Name: ${playerName}`,
-      `Game mode: ${modeLabel()}`,
       `Questions asked: ${score.asked}`,
       `Answers correct: ${score.correct}`,
       `Correct in a row: ${score.streak}`,
@@ -1041,6 +1093,9 @@ document.addEventListener("keydown", (e) => {
     minorRefBtn?.addEventListener("click", () => playReferenceChord("minor"));
     majorRefBtn?.addEventListener("click", () => playReferenceChord("major"));
 
+    compareMajorBtn?.addEventListener("click", () => playCompareChord("major"));
+    compareMinorBtn?.addEventListener("click", () => playCompareChord("minor"));
+
     nextBtn.addEventListener("click", goNext);
     downloadScoreBtn.addEventListener("click", onDownloadScoreCard);
 
@@ -1078,6 +1133,8 @@ document.addEventListener("keydown", (e) => {
     computeRootBounds();
     renderScore();
     updateBeginButton();
+    setIntroVisible(true);
+    setCompareVisible(false);
     buildMiniKeyboardChord(null, null);
     setFeedback("Press <strong>Begin Game</strong> to start.");
     updateControls();

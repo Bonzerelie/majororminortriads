@@ -9,9 +9,14 @@
 <body>
   <div class="app">
     <header class="hero">
-      <h1 class="app-title">Major Or Minor? 🎶</h1>
-      <p class="app-subtitle-large">Root Position Triads</p>
-      <p class="app-subtitle">
+      <!-- Title/subtitle replaced with responsive image -->
+      <picture class="titlePicture" aria-label="Major Or Minor title">
+        <source media="(max-width: 520px)" srcset="images/titlewrapped.png" />
+        <img class="titleGraphic" src="images/title.png" alt="Major Or Minor? Root Position Triads" />
+      </picture>
+
+      <!-- Intro text that disappears when game begins -->
+      <p class="app-subtitle" id="introText">
         Press <strong>Begin Game</strong>. You’ll hear a root-position triad and need to decide whether it’s
         <strong>Major</strong> or <strong>Minor</strong>.<br>
         Hint: how do the chords make you feel?
@@ -25,14 +30,14 @@
           <button id="replayBtn" type="button" disabled>Replay Chord</button>
           <button id="nextBtn" type="button" disabled>Next</button>
           <button id="infoBtn" type="button">Information</button>
-</div>
+        </div>
       </div>
     </section>
 
     <div>
       <header class="hero">
-      <p class="app-subtitle">Use <strong>R</strong> to replay, <strong>⬅️</strong> for <strong>Minor,</strong> <strong>➡️</strong> for <strong>Major,</strong> and <strong>spacebar</strong> for <strong>Next</strong></p>
-    </header>
+        <p class="app-subtitle">Use <strong>R</strong> to replay, <strong>⬅️</strong> for <strong>Minor,</strong> <strong>➡️</strong> for <strong>Major,</strong> and <strong>spacebar</strong> for <strong>Next</strong></p>
+      </header>
     </div>
 
     <section class="controlsPanel controlsPanelActions" aria-label="answers">
@@ -68,9 +73,19 @@
             </div>
 
             <div class="miniLegend miniLegendInCard" aria-hidden="true">
-  <span class="legendDot legendTone"></span> Chord tones
-</div>
-<div id="miniMount" class="mount miniMount miniMountInCard" aria-label="Chord diagram"></div>
+              <span class="legendDot legendTone"></span> Chord tones
+            </div>
+
+            <div id="miniMount" class="mount miniMount miniMountInCard" aria-label="Chord diagram"></div>
+
+            <!-- Compare panel (only shown after answering) -->
+            <div id="comparePanel" class="comparePanel hidden" aria-label="compare major and minor">
+              <div class="compareSubtitle">Compare</div>
+              <div class="compareRow">
+                <button id="compareMajorBtn" type="button" class="compareBtn">Hear X Major</button>
+                <button id="compareMinorBtn" type="button" class="compareBtn">Hear X Minor</button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -84,12 +99,13 @@
     <footer class="endnotes"></footer>
   </div>
 
+  <!-- Info modal (no background darkening now; CSS handles this) -->
   <div id="infoModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
     <div class="modalCard" role="document">
       <div class="modalHeader">
         <h2 id="infoTitle">More information 🧐</h2>
       </div>
-  
+
       <div class="modalBody">
         <p>In modern Western music, Major and Minor triads (triad just means a three note chord) are the two most common types of chords (chord meaning 3 or more notes at the same time) and they make up the vast majority of all the chords you'll hear in Western genres like pop, rock, indie, etc. <br>
           Typically music will have a melody line (what you might think of as the 'tune' - it's often the line that's sung, or what you might hum), and this will be accompanied by chords, which form the 'harmony'. The structure of these chords, for example whether they are major or minor, helps dictate the emotional feeling of the music. <br>
@@ -98,14 +114,14 @@
           Minor Triads = X (+3 semitones) Y (+4 semitones) Z<br>
         <strong>Most importantly</strong> many people develop emotional connections with specific chord types - many people feel minor chords sound 'sad', whilst major chords sound 'grander', or 'happier'. We can listen for these sounds to determine the quality of the chord.</p>
       </div>
-  
+
       <div class="modalFooter">
         <button id="infoOk" type="button" class="primary">Got it</button>
       </div>
     </div>
   </div>
-  
 
+  <!-- Streak modal (keeps dark overlay) -->
   <div class="modal hidden" id="streakModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modalCard">
       <div class="modalTitle" id="modalTitle">New Longest Streak!</div>
