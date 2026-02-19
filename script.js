@@ -6,7 +6,27 @@
 (() => {
   "use strict";
 
-  const AUDIO_DIR = "audio";
+  
+
+  function lockIframeScrolling() {
+    const de = document.documentElement;
+    const b = document.body;
+
+    de.style.overflow = "hidden";
+    de.style.overscrollBehavior = "none";
+    de.style.touchAction = "pan-x";
+
+    if (b) {
+      b.style.overflow = "hidden";
+      b.style.overscrollBehavior = "none";
+      b.style.touchAction = "pan-x";
+    }
+  }
+
+  lockIframeScrolling();
+  window.addEventListener("load", lockIframeScrolling, { passive: true });
+
+const AUDIO_DIR = "audio";
 
   const CHORD_PLAY_SEC = 4.6;
   const FADE_OUT_SEC = 0.12;
@@ -140,28 +160,38 @@
 
   // ---------------- iframe sizing ----------------
   let lastHeight = 0;
-  const ro = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const height = Math.ceil(entry.contentRect.height);
-      if (height !== lastHeight) {
-        parent.postMessage({ iframeHeight: height }, "*");
-        lastHeight = height;
-      }
+
+  function measureDocHeightPx() {
+    const de = document.documentElement;
+    const b = document.body;
+    const h = Math.max(
+      de ? de.scrollHeight : 0,
+      b ? b.scrollHeight : 0,
+      de ? Math.ceil(de.getBoundingClientRect().height) : 0,
+      b ? Math.ceil(b.getBoundingClientRect().height) : 0
+    );
+    return Math.max(0, Math.ceil(h));
+  }
+
+  const ro = new ResizeObserver(() => {
+    const height = measureDocHeightPx();
+    if (height && height !== lastHeight) {
+      parent.postMessage({ iframeHeight: height }, "*");
+      lastHeight = height;
     }
   });
-  ro.observe(document.documentElement);
 
-  function postHeightNow() {
+  ro.observe(document.documentElement);
+  if (document.body) ro.observe(document.body);
+
+function postHeightNow() {
     try {
-      const h = Math.max(
-        document.documentElement.scrollHeight,
-        document.body ? document.body.scrollHeight : 0
-      );
-      parent.postMessage({ iframeHeight: h }, "*");
+      const h = measureDocHeightPx();
+      if (h) parent.postMessage({ iframeHeight: h }, "*");
     } catch {}
   }
 
-  window.addEventListener("load", () => {
+window.addEventListener("load", () => {
     postHeightNow();
     setTimeout(postHeightNow, 250);
     setTimeout(postHeightNow, 1000);
@@ -173,89 +203,86 @@
   });
 
   function enableScrollForwardingToParent() {
-  const SCROLL_GAIN = 6.0;
+    const SCROLL_GAIN = 6.0;
 
-  // Treat the game like a non-scrollable surface.
-  // If you ever add a real scrollable panel inside the iframe, we can refine this.
-  const isVerticallyScrollable = () => false;
+    const isVerticallyScrollable = () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2;
 
-  const isInteractiveTarget = (t) =>
-    t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
+    const isInteractiveTarget = (t) =>
+      t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
 
-  let startX = 0;
-  let startY = 0;
-  let lastY = 0;
-  let lockedMode = null;
+    let startX = 0;
+    let startY = 0;
+    let lastY = 0;
+    let lockedMode = null;
 
-  let lastMoveTs = 0;
-  let vScrollTop = 0;
+    let lastMoveTs = 0;
+    let vScrollTop = 0;
 
-  window.addEventListener("touchstart", (e) => {
-    if (!e.touches || e.touches.length !== 1) return;
-    const t = e.target;
+    window.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.target;
 
-    lockedMode = null;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    lastY = startY;
+      lockedMode = null;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lastY = startY;
 
-    lastMoveTs = e.timeStamp || performance.now();
-    vScrollTop = 0;
+      lastMoveTs = e.timeStamp || performance.now();
+      vScrollTop = 0;
 
-    if (isInteractiveTarget(t)) lockedMode = "x";
-  }, { passive: true });
+      if (isInteractiveTarget(t)) lockedMode = "x";
+    }, { passive: true });
 
-  window.addEventListener("touchmove", (e) => {
-    if (!e.touches || e.touches.length !== 1) return;
-    if (isVerticallyScrollable()) return;
+    window.addEventListener("touchmove", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      if (isVerticallyScrollable()) return;
 
-    const x = e.touches[0].clientX;
-    const y = e.touches[0].clientY;
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
 
-    const dx = x - startX;
-    const dy = y - startY;
+      const dx = x - startX;
+      const dy = y - startY;
 
-    if (!lockedMode) {
-      if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
-      else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
-      else return;
+      if (!lockedMode) {
+        if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
+        else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
+        else return;
+      }
+      if (lockedMode !== "y") return;
+
+      const nowTs = e.timeStamp || performance.now();
+      const dt = Math.max(8, nowTs - lastMoveTs);
+      lastMoveTs = nowTs;
+
+      const fingerStep = (y - lastY) * SCROLL_GAIN;
+      lastY = y;
+
+      const scrollTopDelta = -fingerStep;
+      const instV = scrollTopDelta / dt;
+      vScrollTop = vScrollTop * 0.75 + instV * 0.25;
+
+      e.preventDefault();
+      parent.postMessage({ scrollTopDelta }, "*");
+    }, { passive: false });
+
+    function endGesture() {
+      if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
+        const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
+        parent.postMessage({ scrollTopVelocity: capped }, "*");
+      }
+      lockedMode = null;
+      vScrollTop = 0;
     }
-    if (lockedMode !== "y") return;
 
-    const nowTs = e.timeStamp || performance.now();
-    const dt = Math.max(8, nowTs - lastMoveTs);
-    lastMoveTs = nowTs;
+    window.addEventListener("touchend", endGesture, { passive: true });
+    window.addEventListener("touchcancel", endGesture, { passive: true });
 
-    const fingerStep = (y - lastY) * SCROLL_GAIN;
-    lastY = y;
-
-    const scrollTopDelta = -fingerStep;
-    const instV = scrollTopDelta / dt;
-    vScrollTop = vScrollTop * 0.75 + instV * 0.25;
-
-    e.preventDefault();
-    parent.postMessage({ scrollTopDelta }, "*");
-  }, { passive: false });
-
-  function endGesture() {
-    if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
-      const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
-      parent.postMessage({ scrollTopVelocity: capped }, "*");
-    }
-    lockedMode = null;
-    vScrollTop = 0;
+    window.addEventListener("wheel", (e) => {
+      if (isVerticallyScrollable()) return;
+      parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+    }, { passive: true });
   }
-
-  window.addEventListener("touchend", endGesture, { passive: true });
-  window.addEventListener("touchcancel", endGesture, { passive: true });
-
-  // IMPORTANT: not passive + preventDefault, otherwise iframe native scroll competes.
-  window.addEventListener("wheel", (e) => {
-    if (isVerticallyScrollable()) return;
-    e.preventDefault();
-    parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
-  }, { passive: false });
-}
   enableScrollForwardingToParent();
 
   // ---------------- audio ----------------
