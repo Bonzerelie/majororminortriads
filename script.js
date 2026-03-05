@@ -10,41 +10,35 @@
 
   const CHORD_PLAY_SEC = 4.6;
   const FADE_OUT_SEC = 0.12;
-
-  // Delay between Begin/Next and chord playback (editable)
   const ROUND_START_DELAY_SEC = 0.35;
-
   const LIMITER_THRESHOLD_DB = -6;
 
+  const UI_SND_SELECT = "select1.mp3";
+  const UI_SND_BACK = "back1.mp3";
+  const UI_SND_CORRECT = "correct1.mp3";
+  const UI_SND_INCORRECT = "incorrect1.mp3";
+
   const PC_TO_STEM = {
-    0: "c",
-    1: "csharp",
-    2: "d",
-    3: "dsharp",
-    4: "e",
-    5: "f",
-    6: "fsharp",
-    7: "g",
-    8: "gsharp",
-    9: "a",
-    10: "asharp",
-    11: "b",
+    0: "c", 1: "csharp", 2: "d", 3: "dsharp", 4: "e", 5: "f",
+    6: "fsharp", 7: "g", 8: "gsharp", 9: "a", 10: "asharp", 11: "b",
   };
 
   const PC_NAMES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   const PC_NAMES_FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
 
-  // Root ranges (always within C3..C6, as requested)
   const RANGES = {
     "easy-1oct": { label: "Root Range: 1 Octave", startOctave: 4, octaves: 1 },
     "med-2oct":  { label: "Root Range: 2 Octaves", startOctave: 3, octaves: 2 },
     "hard-3oct": { label: "Root Range: 3 Octaves", startOctave: 3, octaves: 3 },
   };
 
-  // Lock root range UI + default to 3 octaves (hard-3oct)
   const LOCKED_ROOT_RANGE = "hard-3oct";
 
   const $ = (id) => document.getElementById(id);
+
+  const titleWrap = $("titleWrap");
+  const titleImgWide = $("titleImgWide");
+  const titleImgWrapped = $("titleImgWrapped");
 
   const beginBtn = $("beginBtn");
   const replayBtn = $("replayBtn");
@@ -53,16 +47,18 @@
   const minorRefBtn = $("minorRefBtn");
   const majorRefBtn = $("majorRefBtn");
   const nextBtn = $("nextBtn");
-  const downloadScoreBtn = $("downloadScoreBtn");
-  const noteRangeSel = $("noteRange");
+  
   const feedbackOut = $("feedbackOut");
-  const scoreOut = $("scoreOut");
   const miniMount = $("miniMount");
-  const introText = $("introText");
 
-  const comparePanel = $("comparePanel");
-  const compareMajorBtn = $("compareMajorBtn");
+  const compareSection = $("compareSection");
   const compareMinorBtn = $("compareMinorBtn");
+  const compareMajorBtn = $("compareMajorBtn");
+
+  const introModal = $("introModal");
+  const introBeginBtn = $("introBeginBtn");
+  const scoreModal = $("scoreModal");
+  const scoreModalContinueBtn = $("scoreModalContinueBtn");
 
   const streakModal = $("streakModal");
   const modalTitle = $("modalTitle");
@@ -75,70 +71,74 @@
   const infoClose = $("infoClose");
   const infoOk = $("infoOk");
 
-  function showInfo() {
-    infoModal?.classList.remove("hidden");
+  const playerNameInput = $("playerNameInput");
+  const downloadScorecardBtn = $("downloadScorecardBtn");
+  const modalPlayerNameInput = $("modalPlayerNameInput");
+  const modalDownloadScorecardBtn = $("modalDownloadScorecardBtn");
+
+  // ---------- dynamic title resizing ----------
+  function setTitleMode(mode) {
+    if (!titleWrap) return;
+    titleWrap.classList.toggle("titleModeWide", mode === "wide");
+    titleWrap.classList.toggle("titleModeWrapped", mode === "wrapped");
+  }
+  function computeDesiredWideWidthPx() {
+    const cssMax = 600;
+    const natural = titleImgWide?.naturalWidth || cssMax;
+    return Math.min(cssMax, natural);
+  }
+  function updateTitleForWidth() {
+    if (!titleWrap || !titleImgWide || !titleImgWrapped) return;
+    const available = Math.floor(titleWrap.getBoundingClientRect().width);
+    const desiredWide = computeDesiredWideWidthPx();
+    if (available + 1 < desiredWide) setTitleMode("wrapped");
+    else setTitleMode("wide");
   }
 
-  function hideInfo() {
-    infoModal?.classList.add("hidden");
+  function syncNames(val) {
+    if (playerNameInput && playerNameInput.value !== val) playerNameInput.value = val;
+    if (modalPlayerNameInput && modalPlayerNameInput.value !== val) modalPlayerNameInput.value = val;
   }
+  playerNameInput?.addEventListener("input", (e) => syncNames(e.target.value));
+  modalPlayerNameInput?.addEventListener("input", (e) => syncNames(e.target.value));
 
-  infoBtn?.addEventListener("click", showInfo);
-  infoClose?.addEventListener("click", hideInfo);
-  infoOk?.addEventListener("click", hideInfo);
-
-  // Close if user clicks the overlay (outside card)
-  infoModal?.addEventListener("click", (e) => {
-    if (e.target === infoModal) hideInfo();
-  });
-
-  // Close on Escape
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !infoModal?.classList.contains("hidden")) hideInfo();
-  });
-
-  if (
-    !beginBtn || !replayBtn || !minorBtn || !majorBtn || !nextBtn ||
-    !downloadScoreBtn || !feedbackOut || !scoreOut || !miniMount
-  ) {
-    const msg = "UI mismatch: required elements missing. Ensure index.html matches script.js ids.";
-    if (feedbackOut) feedbackOut.textContent = msg;
-    else alert(msg);
-    return;
+  let lastFocusEl = null;
+  function openModal(modalEl) {
+    lastFocusEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modalEl?.classList.remove("hidden");
+    postHeightNow();
   }
-
-  // Enforce fixed root range (3 octaves) and hide selector in the UI.
-  if (noteRangeSel) {
-    noteRangeSel.value = LOCKED_ROOT_RANGE;
-    noteRangeSel.disabled = true;
-    noteRangeSel.parentElement?.classList?.add("hidden");
-  }
-
-  function setIntroVisible(visible) {
-    if (!introText) return;
-    introText.classList.toggle("hidden", !visible);
-  }
-
-  function setCompareVisible(visible, rootName = "X") {
-    if (!comparePanel || !compareMajorBtn || !compareMinorBtn) return;
-
-    const safeRoot = String(rootName || "X");
-    compareMajorBtn.textContent = `Hear ${safeRoot} Major`;
-    compareMinorBtn.textContent = `Hear ${safeRoot} Minor`;
-
-    comparePanel.classList.toggle("hidden", !visible);
-  }
-
-  function refreshComparePanel() {
-    if (!chord || !awaitingNext) {
-      setCompareVisible(false);
-      return;
+  function closeModal(modalEl) {
+    modalEl?.classList.add("hidden");
+    postHeightNow();
+    if (lastFocusEl) {
+      try { lastFocusEl.focus(); } catch {}
     }
-    const rootName = noteNameForPc(pcFromPitch(chord.rootPitch));
-    setCompareVisible(true, rootName);
   }
 
-  // ---------------- iframe sizing ----------------
+  function showInfo() { openModal(infoModal); }
+  function hideInfo() { closeModal(infoModal); }
+
+  infoBtn?.addEventListener("click", () => { playUiSound(UI_SND_SELECT); showInfo(); });
+  infoClose?.addEventListener("click", () => { playUiSound(UI_SND_BACK); hideInfo(); });
+  infoOk?.addEventListener("click", () => { playUiSound(UI_SND_BACK); hideInfo(); });
+
+  [infoModal, introModal].forEach((m) => {
+    m?.addEventListener("click", (e) => {
+      if (e.target === m) {
+        playUiSound(UI_SND_BACK);
+        if (m === infoModal) hideInfo();
+      }
+    });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !infoModal?.classList.contains("hidden")) {
+      playUiSound(UI_SND_BACK);
+      hideInfo();
+    }
+  });
+
   let lastHeight = 0;
   const ro = new ResizeObserver((entries) => {
     for (const entry of entries) {
@@ -172,7 +172,77 @@
     setTimeout(postHeightNow, 500);
   });
 
- 
+  function enableScrollForwardingToParent() {
+    const SCROLL_GAIN = 6.0;
+
+    const isVerticallyScrollable = () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2;
+
+    const isInteractiveTarget = (t) =>
+      t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
+
+    let startX = 0; let startY = 0; let lastY = 0;
+    let lockedMode = null; let lastMoveTs = 0; let vScrollTop = 0;
+
+    window.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.target;
+      lockedMode = null;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lastY = startY;
+      lastMoveTs = e.timeStamp || performance.now();
+      vScrollTop = 0;
+      if (isInteractiveTarget(t)) lockedMode = "x";
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      if (isVerticallyScrollable()) return;
+
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - startX;
+      const dy = y - startY;
+
+      if (!lockedMode) {
+        if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
+        else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
+        else return;
+      }
+      if (lockedMode !== "y") return;
+
+      const nowTs = e.timeStamp || performance.now();
+      const dt = Math.max(8, nowTs - lastMoveTs);
+      lastMoveTs = nowTs;
+
+      const fingerStep = (y - lastY) * SCROLL_GAIN;
+      lastY = y;
+      const scrollTopDelta = -fingerStep;
+      const instV = scrollTopDelta / dt;
+      vScrollTop = vScrollTop * 0.75 + instV * 0.25;
+
+      e.preventDefault();
+      parent.postMessage({ scrollTopDelta }, "*");
+    }, { passive: false });
+
+    function endGesture() {
+      if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
+        const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
+        parent.postMessage({ scrollTopVelocity: capped }, "*");
+      }
+      lockedMode = null;
+      vScrollTop = 0;
+    }
+
+    window.addEventListener("touchend", endGesture, { passive: true });
+    window.addEventListener("touchcancel", endGesture, { passive: true });
+    window.addEventListener("wheel", (e) => {
+      if (isVerticallyScrollable()) return;
+      parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+    }, { passive: true });
+  }
+  enableScrollForwardingToParent();
 
   // ---------------- audio ----------------
   let audioCtx = null;
@@ -181,15 +251,13 @@
 
   const bufferPromiseCache = new Map();
   const activeVoices = new Set();
+  const activeUiAudios = new Set();
 
   function ensureAudioGraph() {
     if (audioCtx) return audioCtx;
 
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) {
-      alert("Your browser doesn’t support Web Audio (required for playback).");
-      return null;
-    }
+    if (!Ctx) return null;
 
     audioCtx = new Ctx();
 
@@ -232,6 +300,23 @@
         v.src.stop(stopAt + 0.02);
       } catch {}
     }
+    activeVoices.clear();
+  }
+  
+  function stopAllUiSounds() {
+    for (const a of Array.from(activeUiAudios)) {
+      try { a.pause(); a.currentTime = 0; } catch {}
+      activeUiAudios.delete(a);
+    }
+  }
+
+  function stopAllAudio() {
+    stopAllNotes(0.04);
+    stopAllUiSounds();
+  }
+
+  function stopAllNotesWithUi(fadeSec = 0.05) {
+    stopAllNotes(fadeSec);
   }
 
   function trackVoice(src, gain, startTime) {
@@ -296,6 +381,28 @@
     return src;
   }
 
+  async function playUiSound(filename) {
+    try {
+      stopAllAudio(); // Cut off everything else before a UI sound
+      const url = `${AUDIO_DIR}/${filename}`;
+      const buffer = await loadBuffer(url);
+      if (!buffer) return;
+      const ctx = ensureAudioGraph();
+      if (!ctx) return;
+      
+      const when = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(2.0, when);
+
+      src.connect(g);
+      g.connect(masterGain);
+      trackVoice(src, g, when);
+      src.start(when);
+    } catch (e) { console.error("UI Sound error:", e); }
+  }
+
   function pitchFromPcOct(pc, oct) { return (oct * 12) + pc; }
   function pcFromPitch(p) { return ((p % 12) + 12) % 12; }
   function octFromPitch(p) { return Math.floor(p / 12); }
@@ -346,13 +453,13 @@
     return true;
   }
 
-  // Reference chords (do not alter game state / UI)
   async function playReferenceChord(quality) {
+    playUiSound(UI_SND_SELECT);
     await resumeAudioIfNeeded();
     const ctx = ensureAudioGraph();
     if (!ctx) return;
 
-    stopAllNotes(0.08);
+    stopAllNotesWithUi(0.08);
 
     const root = pitchFromPcOct(0, 4); // C4
     const third = root + (quality === "major" ? 4 : 3);
@@ -364,23 +471,23 @@
 
   async function playCompareChord(quality) {
     if (!started || !chord) return;
-
+    playUiSound(UI_SND_SELECT);
     await resumeAudioIfNeeded();
     const ctx = ensureAudioGraph();
     if (!ctx) return;
 
-    stopAllNotes(0.08);
+    stopAllNotesWithUi(0.08);
 
     const root = chord.rootPitch;
     const third = root + (quality === "major" ? 4 : 3);
     const fifth = root + 7;
 
     const whenSec = ctx.currentTime + 0.03;
-    await playChordWindowed([root, third, fifth], whenSec, 2.6, FADE_OUT_SEC);
+    await playChordWindowed([root, third, fifth], whenSec, 2.2, FADE_OUT_SEC);
   }
 
   // ---------------- game state ----------------
-  const score = { asked: 0, correct: 0, streak: 0, longestStored: 0 };
+  const score = { asked: 0, correct: 0, incorrect: 0, streak: 0, longestStored: 0 };
 
   let started = false;
   let awaitingNext = false;
@@ -389,7 +496,7 @@
   let rootMin = 0;
   let rootMax = 0;
 
-  let chord = null; // { quality: 'major'|'minor', rootPitch, pitches:[r, t, f] }
+  let chord = null; 
 
   function randomInt(min, max) {
     const a = Math.ceil(min);
@@ -398,17 +505,18 @@
   }
 
   function currentMode() {
-    if (RANGES[LOCKED_ROOT_RANGE]) return RANGES[LOCKED_ROOT_RANGE];
-    const key = noteRangeSel?.value;
-    return (key && RANGES[key]) || RANGES["hard-3oct"];
+    return RANGES[LOCKED_ROOT_RANGE] || RANGES["hard-3oct"];
+  }
+
+  function modeLabel() {
+    return currentMode().label;
   }
 
   function computeRootBounds() {
     const m = currentMode();
-    rootMin = pitchFromPcOct(0, m.startOctave);
-    rootMax = pitchFromPcOct(0, m.startOctave + m.octaves);
+    rootMin = pitchFromPcOct(0, m.startOctave);           
+    rootMax = pitchFromPcOct(0, m.startOctave + m.octaves); 
 
-    // Hard clamp to requested C3..C6 root range
     const c3 = pitchFromPcOct(0, 3);
     const f5 = pitchFromPcOct(5, 5);
     rootMin = Math.max(rootMin, c3);
@@ -440,20 +548,17 @@
   }
 
   function renderScore() {
-    const items = [
-      ["Questions asked", score.asked],
-      ["Answers correct", score.correct],
-      ["Correct in a row", score.streak],
-      ["Longest correct streak", displayLongest()],
-      ["Percentage correct", `${scorePercent()}%`],
-    ];
+    if ($("correctOut")) $("correctOut").textContent = score.correct;
+    if ($("incorrectOut")) $("incorrectOut").textContent = score.incorrect;
+    if ($("streakOut")) $("streakOut").textContent = score.streak;
+    if ($("longestOut")) $("longestOut").textContent = displayLongest();
+    if ($("accuracyOut")) $("accuracyOut").textContent = `${scorePercent()}%`;
 
-    scoreOut.innerHTML =
-      `<div class="scoreGrid scoreGridVertical">` +
-      items.map(([k, v]) =>
-        `<div class="scoreItem"><span class="scoreK">${k}</span><span class="scoreV">${v}</span></div>`
-      ).join("") +
-      `</div>`;
+    if ($("modalCorrectOut")) $("modalCorrectOut").textContent = score.correct;
+    if ($("modalIncorrectOut")) $("modalIncorrectOut").textContent = score.incorrect;
+    if ($("modalStreakOut")) $("modalStreakOut").textContent = score.streak;
+    if ($("modalLongestOut")) $("modalLongestOut").textContent = displayLongest();
+    if ($("modalAccuracyOut")) $("modalAccuracyOut").textContent = `${scorePercent()}%`;
   }
 
   function setFeedback(html) {
@@ -478,8 +583,10 @@
   }
 
   function updateBeginButton() {
-    beginBtn.textContent = started ? "Restart Game" : "Begin Game";
+    beginBtn.textContent = started ? "End / Restart Game" : "Begin Game";
     beginBtn.classList.toggle("pulse", !started);
+    beginBtn.classList.toggle("primary", !started);
+    beginBtn.classList.toggle("isRestart", started);
   }
 
   // ---------------- mini keyboard ----------------
@@ -520,7 +627,7 @@
     const c3 = pitchFromPcOct(0, 3);
     const c6 = pitchFromPcOct(0, 6);
     const hardLo = c3;
-    const hardHi = c6 + 12;
+    const hardHi = c6 + 12; 
 
     startC = clamp(startC, hardLo, hardHi);
     endC = clamp(endC, hardLo, hardHi);
@@ -549,7 +656,7 @@
     const BORDER = 8;
     const RADIUS = 14;
 
-    const whitePitches = all.filter(p => whiteIndexInOctave(((p % 12) + 12) % 12) != null);
+    const whitePitches = all.filter(p => whiteIndexInOctave(pcFromPitch(p)) != null);
     if (!whitePitches.length) {
       const s = el("svg", { width: 780, height: 128, viewBox: "0 0 780 128" });
       miniMount.appendChild(s);
@@ -577,6 +684,7 @@
       .w rect{ fill:#fff; stroke:#222; stroke-width:1; }
       .b rect{ fill:#111; stroke:#000; stroke-width:1; rx:3; ry:3; }
       .lbl{ font-family: Arial, Helvetica, sans-serif; font-size:11px; fill: rgba(0,0,0,0.55); font-weight:800; user-select:none; }
+
       .tone rect{ fill: var(--chordTone) !important; }
       .tone .lbl{ fill: rgba(255,255,255,0.95) !important; }
     `;
@@ -609,8 +717,8 @@
       const p = whitePitches[i];
       const x = startX + i * WHITE_W;
 
-      const pc = ((p % 12) + 12) % 12;
-      const oct = Math.floor(p / 12);
+      const pc = pcFromPitch(p);
+      const oct = octFromPitch(p);
       const name = PC_NAMES_SHARP[pc] + oct;
 
       const grp = el("g", { class: "w" });
@@ -625,14 +733,14 @@
     }
 
     for (let p = lo; p <= hi; p++) {
-      const pc = ((p % 12) + 12) % 12;
+      const pc = pcFromPitch(p);
       if (!isBlackPc(pc)) continue;
 
       const leftPcByBlack = { 1:0, 3:2, 6:5, 8:7, 10:9 };
       const leftPc = leftPcByBlack[pc];
       if (leftPc == null) continue;
 
-      const oct = Math.floor(p / 12);
+      const oct = octFromPitch(p);
       const leftWhitePitch = pitchFromPcOct(leftPc, oct);
 
       const wi = whiteIndexByPitch.get(leftWhitePitch);
@@ -661,7 +769,7 @@
 
     canAnswer = false;
     updateControls();
-    stopAllNotes(0.08);
+    stopAllNotesWithUi(0.08);
 
     const ctx = ensureAudioGraph();
     if (!ctx) return;
@@ -690,9 +798,8 @@
 
     chord = pickChord();
 
-    setCompareVisible(false);
-
     buildMiniKeyboardChord(null, null);
+    compareSection.classList.add("hidden");
     setFeedback("Listen carefully…");
 
     if (autoplay) {
@@ -706,19 +813,12 @@
 
   async function replay() {
     if (!started || !chord) return;
-
-    const lockedForNext = awaitingNext;
+    stopAllNotesWithUi(0.08);
     setFeedback("Replaying…");
-
-    if (!lockedForNext) buildMiniKeyboardChord(null, null);
-    updateControls();
-
-    await playCurrentChord({
-      allowAnswerAfter: !lockedForNext,
-      delaySec: ROUND_START_DELAY_SEC,
-    });
-
-    if (lockedForNext) updateControls();
+    buildMiniKeyboardChord(null, null);
+    awaitingNext = false;
+    compareSection.classList.add("hidden");
+    await playCurrentChord({ allowAnswerAfter: true, delaySec: ROUND_START_DELAY_SEC });
   }
 
   function showPopup(title, message, { showDownload = false } = {}) {
@@ -726,12 +826,7 @@
     modalTitle.textContent = title;
     modalBody.textContent = message;
     modalDownload.classList.toggle("hidden", !showDownload);
-    streakModal.classList.remove("hidden");
-    modalClose.focus();
-  }
-
-  function hidePopup() {
-    streakModal?.classList.add("hidden");
+    openModal(streakModal);
   }
 
   function considerStreakForLongestOnFail(prevStreak) {
@@ -764,6 +859,7 @@
 
   function answer(choice) {
     if (!started || !canAnswer || !chord) return;
+    stopAllNotesWithUi(0.06);
 
     score.asked += 1;
 
@@ -777,16 +873,17 @@
     if (isCorrect) {
       score.correct += 1;
       score.streak += 1;
-      renderScore();
+      setTimeout(() => playUiSound(UI_SND_CORRECT), 20);
       setFeedback(
         `Correct! ✅<br/>` +
         `Chord: <strong>${rootName} ${qualityName}</strong> — notes ${notesLabel}.`
       );
     } else {
+      score.incorrect += 1;
       const prev = score.streak;
       score.streak = 0;
       considerStreakForLongestOnFail(prev);
-      renderScore();
+      playUiSound(UI_SND_INCORRECT);
       setFeedback(
         `Incorrect ❌ (You chose <strong>${choice}</strong>.)<br/>` +
         `Chord: <strong>${rootName} ${qualityName}</strong> — notes ${notesLabel} ` +
@@ -794,17 +891,21 @@
       );
     }
 
+    renderScore();
     buildMiniKeyboardChord(chord.pitches, pitchSetForChord(chord));
+
+    // Show compare buttons dynamically labelled with the current root
+    compareSection.classList.remove("hidden");
+    compareMinorBtn.textContent = `Play ${rootName} Minor`;
+    compareMajorBtn.textContent = `Play ${rootName} Major`;
+
     lockAfterAnswer();
-    refreshComparePanel();
   }
 
   async function goNext() {
     if (!started || !awaitingNext) return;
-
-    // Hide compare UI immediately on Next (no async lag).
-    setCompareVisible(false);
-
+    playUiSound(UI_SND_SELECT);
+    stopAllNotesWithUi(0.08);
     setFeedback("");
     await startNewRound({ autoplay: true });
   }
@@ -813,11 +914,11 @@
     await resumeAudioIfNeeded();
 
     started = true;
-    setIntroVisible(false);
     updateBeginButton();
 
     score.asked = 0;
     score.correct = 0;
+    score.incorrect = 0;
     score.streak = 0;
     score.longestStored = 0;
     renderScore();
@@ -825,183 +926,259 @@
     await startNewRound({ autoplay: true });
   }
 
-  function resetToInitialScreen() {
-    stopAllNotes(0.08);
-    hidePopup();
-    hideInfo();
+  function returnToStartScreen({ openIntro = false } = {}) {
+    stopAllNotesWithUi(0.06);
 
     started = false;
     awaitingNext = false;
-    canAnswer = false;
     chord = null;
 
     score.asked = 0;
     score.correct = 0;
+    score.incorrect = 0;
     score.streak = 0;
     score.longestStored = 0;
-
+    
     renderScore();
-    updateBeginButton();
-    setIntroVisible(true);
-    buildMiniKeyboardChord(null, null);
-    setCompareVisible(false);
-    setFeedback("Press <strong>Begin Game</strong> to start.");
     updateControls();
+    updateBeginButton();
+    
+    buildMiniKeyboardChord(null, null);
+    compareSection.classList.add("hidden");
+    setFeedback("Press <strong>Begin Game</strong> to start.");
+
+    if (openIntro && introModal) {
+      openModal(introModal);
+      try { introBeginBtn.focus(); } catch {}
+    }
   }
 
-  function restartGame() {
-    resetToInitialScreen();
+  let scoreModalContinueCallback = null;
+  function showScoreModal(onContinue) {
+    scoreModalContinueCallback = onContinue;
+    openModal(scoreModal);
+    try { scoreModalContinueBtn.focus(); } catch {}
   }
 
   // ---------------- downloads ----------------
-  function downloadBlob(blob, filename) {
-    const a = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
+  async function loadImage(src) {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+  
+  function drawImageContain(ctx, img, x, y, w, h) {
+    const iw = img.naturalWidth || img.width || 1;
+    const ih = img.naturalHeight || img.height || 1;
+    const r = Math.min(w / iw, h / ih);
+    const dw = Math.max(1, iw * r);
+    const dh = Math.max(1, ih * r);
+    const dx = x + (w - dw) / 2;
+    const dy = y + (h - dh) / 2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return { w: dw, h: dh, x: dx, y: dy };
   }
 
-  function canvasToPngBlob(canvas) {
-    return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
+  function drawRoundRect(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
   }
 
-  function drawCardBase(ctx, w, h) {
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "#fbfbfc";
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.strokeStyle = "rgba(0,0,0,0.12)";
-    ctx.lineWidth = 6;
-    ctx.strokeRect(8, 8, w - 16, h - 16);
-
-    ctx.fillStyle = "#111";
-    ctx.fillRect(8, 8, w - 16, 74);
+  function sanitizeFilenamePart(s) {
+    const v = String(s || "").trim().replace(/\s+/g, "_");
+    const cleaned = v.replace(/[^a-zA-Z0-9_\-]+/g, "");
+    return cleaned.slice(0, 32) || "";
   }
+  function safeText(s) { return String(s || "").replace(/[\u0000-\u001f\u007f]/g, "").trim(); }
 
-  function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight) {
-    const words = String(text).split(/\s+/);
-    let line = "";
-    for (const word of words) {
-      const test = line ? `${line} ${word}` : word;
-      if (ctx.measureText(test).width > maxWidth && line) {
-        ctx.fillText(line, x, y);
-        line = word;
-        y += lineHeight;
-      } else {
-        line = test;
-      }
-    }
-    if (line) ctx.fillText(line, x, y);
-  }
+  function saveName(name) { try { localStorage.setItem("hol_player_name", String(name || "").trim().slice(0, 32)); } catch {} }
 
-  function getPlayerName() {
-    const prev = localStorage.getItem("hol_player_name") || "";
-    const name = window.prompt("Enter your name for the score card:", prev) ?? "";
-    const trimmed = String(name).trim();
-    if (trimmed) localStorage.setItem("hol_player_name", trimmed);
-    return trimmed || "Player";
-  }
+  async function downloadScorecardPng(nameInputEl) {
+    const LAYOUT = {
+      gapAfterImage: 32,           
+      gapAfterUrl: 36,             
+      gapAfterTitle: 30,           
+      gapAfterMeta: 28,            
+      gapAfterName: 22,            
+      gapNoNameCompensation: 12,   
+      mainGridRowGap: 14,          
+    };
 
-  async function downloadScoreCardPng(playerName) {
-    const w = 560;
-    const h = 520;
+    const name = safeText(nameInputEl?.value);
+    if (nameInputEl) saveName(name);
+
+    const W = 720;
+    const rowsCount = 5;
+    const rowH = 58;
+    const baseContentH = 340; 
+    const H = baseContentH + (rowsCount * (rowH + LAYOUT.mainGridRowGap)) + 80; 
+    
+    const dpr = Math.max(1, Math.floor((window.devicePixelRatio || 1) * 100) / 100);
+
     const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    ctx.scale(dpr, dpr);
 
-    drawCardBase(ctx, w, h);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = "#fff";
-    ctx.font = "900 30px Arial";
-    ctx.fillText("Major Or Minor?! — Scorecard", 28, 56);
+    const pad = 34;
+    const cardX = pad;
+    const cardY = pad;
+    const cardW = W - pad * 2;
+    const cardH = H - pad * 2;
 
-    const bodyX = 28;
-    const bodyY = 130;
+    ctx.fillStyle = "#f9f9f9";
+    drawRoundRect(ctx, cardX, cardY, cardW, cardH, 18);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 1;
+    drawRoundRect(ctx, cardX, cardY, cardW, cardH, 18);
+    ctx.stroke();
+
+    const titleSrc = titleImgWide?.getAttribute("src") || "images/title.png";
+    const titleImg = await loadImage(titleSrc);
+
+    let yCursor = cardY + 26;
+
+    if (titleImg) {
+      const imgMaxW = Math.min(520, cardW - 40);
+      const imgMaxH = 92;
+      drawImageContain(ctx, titleImg, (W - imgMaxW) / 2, yCursor, imgMaxW, imgMaxH);
+      yCursor += imgMaxH + LAYOUT.gapAfterImage;
+    }
+
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.font = "800 18px Arial, Helvetica, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("www.eartraininglab.com", W / 2, yCursor);
+    yCursor += LAYOUT.gapAfterUrl;
 
     ctx.fillStyle = "#111";
-    ctx.font = "900 22px Arial";
-    ctx.fillText("Summary", bodyX, bodyY);
+    ctx.textAlign = "center";
+    ctx.font = "700 26px Arial, Helvetica, sans-serif";
+    ctx.fillText("Score Card", W / 2, yCursor);
+    yCursor += LAYOUT.gapAfterTitle;
 
-    ctx.font = "700 20px Arial";
-    const lines = [
-      `Name: ${playerName}`,
-      `Questions asked: ${score.asked}`,
-      `Answers correct: ${score.correct}`,
-      `Correct in a row: ${score.streak}`,
-      `Longest correct streak: ${displayLongest()}`,
-      `Percentage correct: ${scorePercent()}%`,
+    ctx.font = "800 18px Arial, Helvetica, sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.70)";
+    ctx.fillText(`Mode: ${modeLabel()}`, W / 2, yCursor);
+    yCursor += LAYOUT.gapAfterMeta;
+
+    if (name) {
+      ctx.fillStyle = "#111";
+      ctx.fillText(`Name: ${name}`, W / 2, yCursor);
+      yCursor += LAYOUT.gapAfterName;
+    } else {
+      yCursor += LAYOUT.gapNoNameCompensation;
+    }
+
+    ctx.fillStyle = "#111";
+    ctx.textAlign = "left";
+
+    const rowX = cardX + 26;
+    const rowW = cardW - 52;
+
+    const rows = [
+      ["Correct", String(score.correct)],
+      ["Incorrect", String(score.incorrect)],
+      ["Correct in a row", String(score.streak)],
+      ["Longest streak", String(displayLongest())],
+      ["Percentage Correct", `${scorePercent()}%`],
     ];
 
-    let y = bodyY + 44;
-    for (const ln of lines) {
-      ctx.fillText(ln, bodyX, y);
-      y += 34;
+    for (const [k, v] of rows) {
+      ctx.fillStyle = "#ffffff";
+      drawRoundRect(ctx, rowX, yCursor, rowW, rowH, 14);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.16)";
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(0,0,0,0.70)";
+      ctx.font = "900 18px Arial, Helvetica, sans-serif";
+      ctx.fillText(k, rowX + 16, yCursor + 33);
+
+      ctx.fillStyle = "#111";
+      ctx.font = "900 22px Arial, Helvetica, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(v, rowX + rowW - 16, yCursor + 37);
+      ctx.textAlign = "left";
+
+      yCursor += rowH + LAYOUT.mainGridRowGap;
     }
 
-    ctx.fillStyle = "rgba(0,0,0,0.65)";
-    ctx.font = "700 16px Arial";
-    ctx.fillText("Downloaded from www.eartraininglab.com 🎶", bodyX, h - 36);
+    ctx.textAlign = "center";
+    ctx.font = "800 14px Arial, Helvetica, sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillText("Major Or Minor?! - www.eartraininglab.com", W / 2, cardY + cardH - 24);
 
-    const blob = await canvasToPngBlob(canvas);
-    if (blob) downloadBlob(blob, "Major Or Minor Scorecard.png");
+    const fileBase = name ? `${sanitizeFilenamePart(name)}_scorecard` : "scorecard";
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${fileBase}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
   }
 
-  async function downloadRecordPng(streakValue, playerName) {
-    const w = 980;
-    const h = 420;
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
+  function initTitleSwap() {
+    if (!titleWrap || !titleImgWide || !titleImgWrapped) return;
+    const tryUpdate = () => updateTitleForWidth();
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (titleImgWide.complete) tryUpdate();
+    else titleImgWide.addEventListener("load", tryUpdate, { once: true });
 
-    drawCardBase(ctx, w, h);
+    if (titleImgWrapped.complete) tryUpdate();
+    else titleImgWrapped.addEventListener("load", tryUpdate, { once: true });
 
-    ctx.fillStyle = "#fff";
-    ctx.font = "900 30px Arial";
-    ctx.fillText("Major Or Minor?! — Record", 28, 56);
-
-    ctx.fillStyle = "#111";
-    ctx.font = "900 28px Arial";
-    ctx.fillText(`${streakValue} correct in a row!`, 28, 142);
-
-    ctx.font = "700 22px Arial";
-    ctx.fillStyle = "#111";
-    const msg = `${playerName} just scored ${streakValue} correct answers in a row on the Major Or Minor?! game 🎉🎶🥳`;
-    drawWrappedText(ctx, msg, 28, 200, w - 56, 34);
-
-    ctx.fillStyle = "rgba(0,0,0,0.65)";
-    ctx.font = "700 16px Arial";
-    ctx.fillText("Downloaded from www.eartraininglab.com 🎶", 28, h - 36);
-
-    const blob = await canvasToPngBlob(canvas);
-    if (blob) downloadBlob(blob, "Major Or Minor Record.png");
-  }
-
-  async function onDownloadScoreCard() {
-    const name = getPlayerName();
-    await downloadScoreCardPng(name);
-  }
-
-  async function onDownloadRecord() {
-    const name = getPlayerName();
-    const v = score.longestStored || displayLongest();
-    await downloadRecordPng(v, name);
+    const tro = new ResizeObserver(() => updateTitleForWidth());
+    tro.observe(titleWrap);
   }
 
   // ---------------- events ----------------
   function bind() {
+    introBeginBtn?.addEventListener("click", () => {
+      playUiSound(UI_SND_SELECT);
+      closeModal(introModal);
+      setFeedback("Press <strong>Begin Game</strong> to start.");
+      try { beginBtn.focus(); } catch {}
+    });
+
+    scoreModalContinueBtn?.addEventListener("click", () => {
+      playUiSound(UI_SND_SELECT);
+      closeModal(scoreModal);
+      if (scoreModalContinueCallback) scoreModalContinueCallback();
+    });
+
     beginBtn.addEventListener("click", async () => {
-      if (!started) await beginGame();
-      else restartGame();
+      playUiSound(UI_SND_SELECT);
+      if (!started) {
+        if (introModal && !introModal.classList.contains("hidden")) closeModal(introModal);
+        await beginGame();
+      } else {
+        showScoreModal(() => {
+          returnToStartScreen({ openIntro: true });
+        });
+      }
     });
 
     replayBtn.addEventListener("click", replay);
@@ -1012,25 +1189,43 @@
     minorRefBtn?.addEventListener("click", () => playReferenceChord("minor"));
     majorRefBtn?.addEventListener("click", () => playReferenceChord("major"));
 
-    compareMajorBtn?.addEventListener("click", () => playCompareChord("major"));
     compareMinorBtn?.addEventListener("click", () => playCompareChord("minor"));
+    compareMajorBtn?.addEventListener("click", () => playCompareChord("major"));
 
     nextBtn.addEventListener("click", goNext);
-    downloadScoreBtn.addEventListener("click", onDownloadScoreCard);
 
-    modalClose?.addEventListener("click", hidePopup);
-    streakModal?.addEventListener("click", (e) => { if (e.target === streakModal) hidePopup(); });
-    modalDownload?.addEventListener("click", onDownloadRecord);
+    downloadScorecardBtn?.addEventListener("click", async () => {
+      playUiSound(UI_SND_SELECT);
+      await downloadScorecardPng(playerNameInput);
+    });
 
-    noteRangeSel?.addEventListener("change", () => {
-      if (noteRangeSel.disabled) return;
-      computeRootBounds();
-      buildMiniKeyboardChord(null, null);
-      if (started) startNewRound({ autoplay: true });
+    modalDownloadScorecardBtn?.addEventListener("click", async () => {
+      playUiSound(UI_SND_SELECT);
+      await downloadScorecardPng(modalPlayerNameInput);
+    });
+
+    modalClose?.addEventListener("click", () => {
+      playUiSound(UI_SND_BACK);
+      closeModal(streakModal);
+    });
+    streakModal?.addEventListener("click", (e) => { 
+      if (e.target === streakModal) {
+        playUiSound(UI_SND_BACK);
+        closeModal(streakModal);
+      }
+    });
+    modalDownload?.addEventListener("click", async () => {
+      playUiSound(UI_SND_SELECT);
+      await downloadScorecardPng(playerNameInput);
+    });
+
+    window.addEventListener("resize", () => {
+      updateTitleForWidth();
     });
 
     document.addEventListener("keydown", async (e) => {
       if (!started) return;
+      if (e.key === "Escape") return;
 
       if (e.code === "KeyR") {
         await replay();
@@ -1049,14 +1244,24 @@
 
   function init() {
     bind();
+    initTitleSwap();
+    
+    const initialName = (localStorage.getItem("hol_player_name") || "").slice(0, 32);
+    if (playerNameInput) playerNameInput.value = initialName;
+    if (modalPlayerNameInput) modalPlayerNameInput.value = initialName;
+
     computeRootBounds();
+    score.incorrect = 0; 
     renderScore();
     updateBeginButton();
-    setIntroVisible(true);
-    setCompareVisible(false);
+    updateTitleForWidth();
     buildMiniKeyboardChord(null, null);
+    compareSection?.classList.add("hidden");
     setFeedback("Press <strong>Begin Game</strong> to start.");
     updateControls();
+
+    openModal(introModal);
+    try { introBeginBtn.focus(); } catch {}
   }
 
   init();

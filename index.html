@@ -9,16 +9,11 @@
 <body>
   <div class="app">
     <header class="hero">
-      <!-- Title/subtitle replaced with responsive image -->
-      <picture class="titlePicture" aria-label="Major Or Minor title">
-        <source media="(max-width: 520px)" srcset="images/titlewrapped.png" />
-        <img class="titleGraphic" src="images/title.png" alt="Major Or Minor? Root Position Triads" />
-      </picture>
-
-      <!-- Intro text that disappears when game begins -->
-      <p class="app-subtitle" id="introText">
-        Press <strong>Begin Game</strong>. You’ll hear a root-position triad and need to decide whether it’s
-        <strong>Major</strong> or <strong>Minor</strong>.<br>
+      <div class="app-titleWrap titleModeWide" id="titleWrap" aria-label="Major Or Minor?!">
+        <img class="app-titleImg app-titleImgWide" id="titleImgWide" src="images/title.png" alt="Major Or Minor?!"/>
+        <img class="app-titleImg app-titleImgWrapped" id="titleImgWrapped" src="images/titlewrapped.png" alt="Major Or Minor?!"/>
+      </div>
+      <p class="app-subtitle">
         Hint: how do the chords make you feel?
       </p>
     </header>
@@ -29,16 +24,10 @@
           <button id="beginBtn" type="button" class="primary pulse">Begin Game</button>
           <button id="replayBtn" type="button" disabled>Replay Chord</button>
           <button id="nextBtn" type="button" disabled>Next</button>
-          <button id="infoBtn" type="button">Information</button>
+          <button id="infoBtn" type="button">Help / Information</button>
         </div>
       </div>
     </section>
-
-    <div>
-      <header class="hero">
-        <p class="app-subtitle">Use <strong>R</strong> to replay, <strong>⬅️</strong> for <strong>Minor,</strong> <strong>➡️</strong> for <strong>Major,</strong> and <strong>spacebar</strong> for <strong>Next</strong></p>
-      </header>
-    </div>
 
     <section class="controlsPanel controlsPanelActions" aria-label="answers">
       <div class="control">
@@ -50,14 +39,6 @@
         <div class="actionsRow actionsCentered refRow" aria-label="reference chords">
           <button id="minorRefBtn" type="button" class="refBtn">Minor Chord Reference</button>
           <button id="majorRefBtn" type="button" class="refBtn">Major Chord Reference</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="controlsPanel controlsPanelActions" aria-label="next">
-      <div class="control">
-        <div class="actionsRow actionsCentered">
-          <button id="downloadScoreBtn" type="button">Download Score Card!</button>
         </div>
       </div>
     </section>
@@ -75,23 +56,35 @@
             <div class="miniLegend miniLegendInCard" aria-hidden="true">
               <span class="legendDot legendTone"></span> Chord tones
             </div>
-
             <div id="miniMount" class="mount miniMount miniMountInCard" aria-label="Chord diagram"></div>
 
-            <!-- Compare panel (only shown after answering) -->
-            <div id="comparePanel" class="comparePanel hidden" aria-label="compare major and minor">
-              <div class="compareSubtitle">Compare</div>
-              <div class="compareRow">
-                <button id="compareMajorBtn" type="button" class="compareBtn">Hear X Major</button>
-                <button id="compareMinorBtn" type="button" class="compareBtn">Hear X Minor</button>
+            <div id="compareSection" class="compareSection hidden">
+              <div class="compareLabel">Compare Major & Minor:</div>
+              <div class="actionsRow actionsCentered">
+                <button id="compareMinorBtn" type="button" class="refBtn">Play Minor</button>
+                <button id="compareMajorBtn" type="button" class="refBtn">Play Major</button>
               </div>
             </div>
+
           </div>
         </div>
 
         <div class="analysisCard scoreCardNarrow">
           <div class="analysisLabel">Score Card</div>
-          <div class="analysisBody scoreBody" id="scoreOut">—</div>
+          <div class="scoreMeta" id="scoreMeta">Mode: Root Position Triads</div>
+
+          <div class="scoreActions" style="margin-bottom: 16px;">
+            <input id="playerNameInput" type="text" inputmode="text" autocomplete="name" maxlength="32" placeholder="Click to enter your name" />
+            <button id="downloadScorecardBtn" type="button">Download Scorecard</button>
+          </div>
+
+          <div class="scoreGrid scoreGridVertical">
+            <div class="scoreItem"><span class="scoreK">Correct</span><span class="scoreV" id="correctOut">0</span></div>
+            <div class="scoreItem"><span class="scoreK">Incorrect</span><span class="scoreV" id="incorrectOut">0</span></div>
+            <div class="scoreItem"><span class="scoreK">Correct in a row</span><span class="scoreV" id="streakOut">0</span></div>
+            <div class="scoreItem"><span class="scoreK">Longest streak</span><span class="scoreV" id="longestOut">0</span></div>
+            <div class="scoreItem"><span class="scoreK">Total Percentage Correct</span><span class="scoreV" id="accuracyOut">0.0%</span></div>
+          </div>
         </div>
       </div>
     </section>
@@ -99,35 +92,73 @@
     <footer class="endnotes"></footer>
   </div>
 
-  <!-- Info modal (no background darkening now; CSS handles this) -->
+  <div aria-labelledby="introTitle" aria-modal="true" class="modal hidden" id="introModal" role="dialog">
+    <div class="modalCard">
+      <img class="app-titleImg" src="images/title.png" style="margin: 0 auto; max-width: 100%;">
+      <div class="modalTitle" id="introTitle" style="margin-top: 10px;">Info & How to Play</div>
+      <div class="modalBody">
+        <p>By far the most common chords (3 or more notes simultaneously) in Western music are Major and Minor chords (and a 3 note chord is called a 'triad'). This game is designed to test and improve your ability to identify both depending on their characteristic sounds. Because both Major and Minor triads are always created using pre-determined formulas of specific intervals between each of their three notes, the relative distances between each of their three notes is always the same no matter what note they begin on. Because of this shared formula all Major chords share a distinctive sound - or 'tonality' - as do all Minor chords. In this game you'll hear a chord and must determine its quality based on that sound.</p>
+        <p>Many people find they associate the different sounds / tonalities of Major and Minor chords with different emotions, or feelings, and this can be a great way to quickly identify both - for example many people feel Minor chords sound 'sadder'. This is subjective, but you can make your own personal associations.</p>
+        <p>Use the <strong>Minor</strong> or <strong>Major</strong> buttons (or arrow keys) to answer. You can press <strong>Replay Chord</strong> or <strong>'R'</strong> to listen again. Use <strong>Next</strong> or <strong>Spacebar</strong> to proceed. You can use the <strong>reference</strong> buttons below the main answers to orient your ear at any time.</p>
+        <p>You can also download a score card .png to save your progress!</p>
+      </div>
+      <div class="modalActions modalActionsCentered" style="margin-bottom: 2px;">
+        <button class="primary pulse" id="introBeginBtn" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <div aria-labelledby="scoreModalTitle" aria-modal="true" class="modal hidden" id="scoreModal" role="dialog">
+    <div class="modalCard">
+      <div class="modalTitle" id="scoreModalTitle" style="margin-bottom: 16px;">Current game ended - here's your scorecard!</div>
+      <div class="modalBody">
+        <div class="analysisGrid" style="width: 100%;">
+          <div class="analysisCard scoreCardNarrow">
+            <div class="analysisLabel">Score Card</div>
+            <div class="scoreMeta" id="modalScoreMeta">Mode: Root Position Triads</div>
+            <div class="scoreActions" style="margin-bottom: 16px;">
+              <input id="modalPlayerNameInput" type="text" inputmode="text" autocomplete="name" maxlength="32" placeholder="Click to enter your name" />
+              <button id="modalDownloadScorecardBtn" type="button">Download Scorecard</button>
+            </div>
+            <div class="scoreGrid scoreGridVertical">
+              <div class="scoreItem"><span class="scoreK">Correct</span><span class="scoreV" id="modalCorrectOut">0</span></div>
+              <div class="scoreItem"><span class="scoreK">Incorrect</span><span class="scoreV" id="modalIncorrectOut">0</span></div>
+              <div class="scoreItem"><span class="scoreK">Correct in a row</span><span class="scoreV" id="modalStreakOut">0</span></div>
+              <div class="scoreItem"><span class="scoreK">Longest streak</span><span class="scoreV" id="modalLongestOut">0</span></div>
+              <div class="scoreItem"><span class="scoreK">Total Percentage Correct</span><span class="scoreV" id="modalAccuracyOut">0.0%</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modalActions modalActionsCentered" style="margin-top: 16px;">
+        <button class="primary pulse" id="scoreModalContinueBtn" type="button">Continue</button>
+      </div>
+    </div>
+  </div>
+
   <div id="infoModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
     <div class="modalCard" role="document">
-      <div class="modalHeader">
-        <h2 id="infoTitle">More information 🧐</h2>
-      </div>
-
+      <div class="modalTitle" id="infoTitle">More information 🧐</div>
       <div class="modalBody">
         <p>In modern Western music, Major and Minor triads (triad just means a three note chord) are the two most common types of chords (chord meaning 3 or more notes at the same time) and they make up the vast majority of all the chords you'll hear in Western genres like pop, rock, indie, etc. <br>
           Typically music will have a melody line (what you might think of as the 'tune' - it's often the line that's sung, or what you might hum), and this will be accompanied by chords, which form the 'harmony'. The structure of these chords, for example whether they are major or minor, helps dictate the emotional feeling of the music. <br>
           Major and Minor triads are made using their own specific formulas. Both start on a root note (below, this is 'X'), and have specific distances between each of the following notes ('Y' and 'Z').<br>
-          Major Triads = X (+4 semitones) Y (+3 semitones) Z<br>
-          Minor Triads = X (+3 semitones) Y (+4 semitones) Z<br>
+          <strong>Major Triads = X (+4 semitones) Y (+3 semitones) Z<br>
+          Minor Triads = X (+3 semitones) Y (+4 semitones) Z</strong><br>
         <strong>Most importantly</strong> many people develop emotional connections with specific chord types - many people feel minor chords sound 'sad', whilst major chords sound 'grander', or 'happier'. We can listen for these sounds to determine the quality of the chord.</p>
       </div>
-
-      <div class="modalFooter">
+      <div class="modalActions modalActionsCentered">
         <button id="infoOk" type="button" class="primary">Got it</button>
       </div>
     </div>
   </div>
 
-  <!-- Streak modal (keeps dark overlay) -->
   <div class="modal hidden" id="streakModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modalCard">
       <div class="modalTitle" id="modalTitle">New Longest Streak!</div>
       <div class="modalBody" id="modalBody">—</div>
-      <div class="modalActions">
-        <button id="modalDownload" type="button">Download Record PNG</button>
+      <div class="modalActions modalActionsCentered">
+        <button id="modalDownload" type="button">Download Scorecard</button>
         <button id="modalClose" type="button" class="primary">Close</button>
       </div>
     </div>
