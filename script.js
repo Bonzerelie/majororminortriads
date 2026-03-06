@@ -11,7 +11,7 @@
   const CHORD_PLAY_SEC = 4.6;
   const FADE_OUT_SEC = 0.12;
   const ROUND_START_DELAY_SEC = 0.35;
-  const LIMITER_THRESHOLD_DB = -6;
+  const LIMITER_THRESHOLD_DB = -3; // Increased headroom
 
   const UI_SND_SELECT = "select1.mp3";
   const UI_SND_BACK = "back1.mp3";
@@ -172,6 +172,78 @@
     setTimeout(postHeightNow, 500);
   });
 
+  function enableScrollForwardingToParent() {
+    const SCROLL_GAIN = 6.0;
+
+    const isVerticallyScrollable = () =>
+      document.documentElement.scrollHeight > window.innerHeight + 2;
+
+    const isInteractiveTarget = (t) =>
+      t instanceof Element && !!t.closest("button, a, input, select, textarea, label");
+
+    let startX = 0; let startY = 0; let lastY = 0;
+    let lockedMode = null; let lastMoveTs = 0; let vScrollTop = 0;
+
+    window.addEventListener("touchstart", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      const t = e.target;
+      lockedMode = null;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lastY = startY;
+      lastMoveTs = e.timeStamp || performance.now();
+      vScrollTop = 0;
+      if (isInteractiveTarget(t)) lockedMode = "x";
+    }, { passive: true });
+
+    window.addEventListener("touchmove", (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      if (isVerticallyScrollable()) return;
+
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - startX;
+      const dy = y - startY;
+
+      if (!lockedMode) {
+        if (Math.abs(dy) > Math.abs(dx) + 4) lockedMode = "y";
+        else if (Math.abs(dx) > Math.abs(dy) + 4) lockedMode = "x";
+        else return;
+      }
+      if (lockedMode !== "y") return;
+
+      const nowTs = e.timeStamp || performance.now();
+      const dt = Math.max(8, nowTs - lastMoveTs);
+      lastMoveTs = nowTs;
+
+      const fingerStep = (y - lastY) * SCROLL_GAIN;
+      lastY = y;
+      const scrollTopDelta = -fingerStep;
+      const instV = scrollTopDelta / dt;
+      vScrollTop = vScrollTop * 0.75 + instV * 0.25;
+
+      e.preventDefault();
+      parent.postMessage({ scrollTopDelta }, "*");
+    }, { passive: false });
+
+    function endGesture() {
+      if (lockedMode === "y" && Math.abs(vScrollTop) > 0.05) {
+        const capped = Math.max(-5.5, Math.min(5.5, vScrollTop));
+        parent.postMessage({ scrollTopVelocity: capped }, "*");
+      }
+      lockedMode = null;
+      vScrollTop = 0;
+    }
+
+    window.addEventListener("touchend", endGesture, { passive: true });
+    window.addEventListener("touchcancel", endGesture, { passive: true });
+    window.addEventListener("wheel", (e) => {
+      if (isVerticallyScrollable()) return;
+      parent.postMessage({ scrollTopDelta: e.deltaY }, "*");
+    }, { passive: true });
+  }
+  enableScrollForwardingToParent();
+
   // ---------------- audio ----------------
   let audioCtx = null;
   let masterGain = null;
@@ -190,14 +262,14 @@
     audioCtx = new Ctx();
 
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = 0.9;
+    masterGain.gain.value = 1.0; // Boosted base output
 
     limiter = audioCtx.createDynamicsCompressor();
     limiter.threshold.value = LIMITER_THRESHOLD_DB;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
-    limiter.attack.value = 0.001;
-    limiter.release.value = 0.12;
+    limiter.attack.value = 0.002;
+    limiter.release.value = 0.1;
 
     masterGain.connect(limiter);
     limiter.connect(audioCtx.destination);
@@ -311,7 +383,7 @@
 
   async function playUiSound(filename) {
     try {
-      stopAllAudio(); // Cut off everything else before a UI sound
+      stopAllAudio(); 
       const url = `${AUDIO_DIR}/${filename}`;
       const buffer = await loadBuffer(url);
       if (!buffer) return;
@@ -322,7 +394,7 @@
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       const g = ctx.createGain();
-      g.gain.setValueAtTime(2.0, when);
+      g.gain.setValueAtTime(2.0, when); // Mixed down for balance
 
       src.connect(g);
       g.connect(masterGain);
@@ -374,7 +446,7 @@
     const bufs = results.map((r) => r?.buffer).filter(Boolean);
     if (!bufs.length) return false;
 
-    const perNoteGain = 0.75 / Math.max(1, bufs.length);
+    const perNoteGain = 0.80; // Allows chords to naturally ring loud, while limiter prevents clipping
     for (let i = 0; i < bufs.length; i++) {
       playBufferWindowed(bufs[i], whenSec, playSec, fadeOutSec, perNoteGain);
     }
