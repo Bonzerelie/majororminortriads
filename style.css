@@ -331,13 +331,10 @@ button.answerPulseMajor{ animation: majorAnswerPulse 1.1s ease-in-out infinite; 
 
 /* Modals */
 .modal {
-  position: absolute; /* Changed from fixed */
-  top: 0; bottom: 0; left: 0; right: 0; /* Replaces inset: 0 for broader compatibility */
-  background: rgba(0,0,0,.45);
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 60px; padding-left: 10px; padding-right: 10px;
-  z-index: 50; 
-  /* Removed overflow, overscroll-behavior, and webkit-overflow-scrolling */
+  z-index: 50; overflow: auto;
 }
 .modal.hidden{display:none}
 
